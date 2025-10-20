@@ -1,0 +1,2 @@
+[console_scripts]
+dab-eval = dab_eval:main
