@@ -4,7 +4,7 @@ id,question,answer,category,task_type,evaluation_method
 3,"PayPal 发布 PYUSD 稳定币 的日期（UTC）？","2023/8/7","web_retrieval","single_doc_fact_qa","rule_based"
 4,"谁在 2017 年公开称"比特币是骗局（fraud）"？","Jamie Dimon","web_retrieval","single_doc_fact_qa","rule_based"
 5,"按 CoinGecko 口径，ETH 的历史最高价（ATH）与日期是？","$4,946.05，2025-08-24","web_retrieval","single_doc_fact_qa","rule_based"
-6,"断言"London 升级在以太坊主网 区块 12,965,000 于 2021-08-05（UTC）激活。请判断真/假，并给出网页来源 + 区块浏览器证据","真；（Web 证据）以太坊基金会/客户端发布；（链上证据）该区块时间戳/客户端日志","web_onchain_retrieval","claim_verification","hybrid"
+6,"断言‘London 升级在以太坊主网 区块 12,965,000 于 2021-08-05（UTC）激活’。请判断真/假，并给出网页来源 + 区块浏览器证据","web_onchain_retrieval","claim_verification","hybrid"
 7,"The Merge 由终端总难度（TTD） 58750000000000000000000 触发。请判断。","真","web_onchain_retrieval","claim_verification","hybrid"
 8,"Base 原生 USDC 合约地址为 0x833589fCD6EDB6E08f4c7C32D4f71B54bDa02913。","真","web_onchain_retrieval","claim_verification","hybrid"
 9,"London 硬分叉（含 EIP-1559）主网激活的区块高度是？","12965000","onchain_retrieval","event_timeline","rule_based"
