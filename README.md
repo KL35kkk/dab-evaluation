@@ -6,7 +6,8 @@ DAB Evaluation SDK is a Python SDK focused on Web3 Agent evaluation, providing s
 
 - **Intelligent Evaluation Strategy**: Automatically select evaluation methods based on task category and type
 - **Multi-dimensional Evaluation**: Fact accuracy, technical expertise, detail level, source credibility
-- **Hybrid Evaluation**: Combine rule-based and LLM-based evaluation advantages
+- **Hybrid Evaluation**: Combine rule-based and LLM-based evaluation advantages with adaptive weighting
+- **Enhanced Scoring Engine**: Normalizes formats, checks key facts, and provides confidence-aware scores for robust rule evaluation
 - **Comprehensive Statistics**: Category-based performance analysis with detailed success rates and score distribution
 - **Enum-based API**: Use enums instead of strings for better type safety
 - **Configurable LLM**: Support custom LLM configurations
@@ -44,7 +45,7 @@ async def main():
     }
     
     # Create SDK instance with LLM config and output path
-    evaluator = DABEvaluator(llm_config, "output")
+    evaluator = DABEvaluator(llm_config, "output")  # Uses enhanced hybrid evaluation by default
     
     # Define Agent
     agent = AgentMetadata(
@@ -98,6 +99,51 @@ async def dataset_evaluation():
     print(f"Successful Tasks: {export_data.get('successful_tasks', 0)}")
 
 asyncio.run(main())
+
+### Using the Enhanced Hybrid Evaluator
+
+The default `DABEvaluator` now builds on the enhanced hybrid evaluator within `dab_eval.evaluation`. The hybrid workflow:
+- Normalises dates / numbers / addresses before matching expected answers.
+- Multiplies rule-based scores by model confidence.
+- Drops LLM scores that fall below the configured `llm_evaluation_threshold`.
+
+If you need to tweak settings while using `DABEvaluator`, access the underlying evaluator via `evaluator.evaluators["hybrid"]` and adjust its attributes (for example, `llm_evaluation_threshold` or `rule_based_weight`).
+
+To customise the evaluation pipeline, you can instantiate the hybrid evaluator directly:
+
+```python
+from dab_eval.evaluation import HybridEvaluator
+
+hybrid = HybridEvaluator({
+    "use_llm_evaluation": True,
+    "llm_evaluation_threshold": 0.6,
+    "rule_based_weight": 0.4,
+    "llm_based_weight": 0.6,
+    "use_enhanced_scoring": True,
+    "llm_config": llm_config,
+})
+result = await hybrid.evaluate(
+    question="When did the SEC approve the bitcoin spot ETF?",
+    agent_response="The SEC approved it on January 10, 2024.",
+    expected_answer="2024-01-10",
+    context={"category": "web_retrieval"},
+)
+print(result["score"], result["reasoning"])
+```
+
+You can also reuse the enhanced scoring utilities independently:
+
+```python
+from dab_eval.evaluation import EnhancedScoringSystem, ScoringMethod
+
+scoring = EnhancedScoringSystem()
+result = scoring.score_answer(
+    expected="Approval date: 2024-01-10",
+    agent="The SEC approved it on January 10, 2024.",
+    method=ScoringMethod.FORMAT_STRICT,
+)
+print(result.score, result.confidence, result.reasoning)
+```
 ```
 
 ## API Documentation

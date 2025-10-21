@@ -847,19 +847,19 @@ class DABEvaluator:
                 "conciseness": 0.0
             }
         
-        # 1. Factual Accuracy - 事实准确性
+        # 1. Factual Accuracy
         factual_accuracy = self._evaluate_factual_accuracy(expected_answer, agent_answer)
         
-        # 2. Completeness - 完整性
+        # 2. Completeness
         completeness = self._evaluate_completeness(expected_answer, agent_answer)
         
-        # 3. Precision - 精确性
+        # 3. Precision
         precision = self._evaluate_precision(expected_answer, agent_answer)
         
-        # 4. Relevance - 相关性
+        # 4. Relevance
         relevance = self._evaluate_relevance(expected_answer, agent_answer)
         
-        # 5. Conciseness - 简洁性
+        # 5. Conciseness
         conciseness = self._evaluate_conciseness(agent_answer)
         
         return {
