@@ -58,9 +58,31 @@ class EnhancedScoringSystem:
             )
 
         scoring_func = self.scoring_methods.get(method, self._hybrid_balanced_scoring)
-        result = scoring_func(expected, agent, context)
+        try:
+            result = scoring_func(expected, agent, context)
+        except Exception as exc:
+            fallback = self._hybrid_balanced_scoring(expected, agent, context)
+            fallback.reasoning += f" | Fallback triggered because {type(exc).__name__}: {exc}"
+            fallback.method = method
+            fallback.confidence = max(0.2, fallback.confidence * 0.8)
+            result = fallback
+
         result.suggestions = self._generate_suggestions(result, expected, agent)
         return result
+
+    # --- Public helpers ---------------------------------------------------------
+
+    def normalize_text(self, text: str) -> str:
+        """Expose text normalisation for external rule engines."""
+        return self._normalize_text(text)
+
+    def extract_key_information(self, text: str) -> List[str]:
+        """Expose key information extraction for reuse."""
+        return self._extract_key_information(text)
+
+    def compare_key_information(self, first: str, second: str) -> bool:
+        """Check whether two information snippets should be treated as equivalent."""
+        return self._is_similar_key_info(first, second)
 
     # --- Core scoring strategies -------------------------------------------------
 
@@ -68,45 +90,36 @@ class EnhancedScoringSystem:
         self, expected: str, agent: str, context: Optional[Dict[str, Any]] = None
     ) -> ScoringResult:
         """Evaluate answers that require strict formatting."""
-        if expected.strip() == agent.strip():
-            return ScoringResult(
-                score=1.0,
-                confidence=1.0,
-                method=ScoringMethod.FORMAT_STRICT,
-                breakdown={"exact_match": 1.0},
-                reasoning="Exact format match",
-                suggestions=[],
-            )
-
         expected_norm, agent_norm = self._normalize_text(expected), self._normalize_text(agent)
 
-        if expected_norm == agent_norm:
-            return ScoringResult(
-                score=0.95,
-                confidence=0.95,
-                method=ScoringMethod.FORMAT_STRICT,
-                breakdown={"normalized_match": 0.95},
-                reasoning="Normalized exact match",
-                suggestions=[],
-            )
+        breakdown: Dict[str, float] = {}
+        reasoning = "Strict format comparison"
 
-        if expected_norm in agent_norm:
-            return ScoringResult(
-                score=0.8,
-                confidence=0.9,
-                method=ScoringMethod.FORMAT_STRICT,
-                breakdown={"substring_match": 0.8},
-                reasoning="Substring match found after normalization",
-                suggestions=[],
-            )
+        if expected.strip() == agent.strip():
+            breakdown["exact_match"] = 1.0
+            score = 1.0
+            reasoning = "Exact format match"
+        elif expected_norm == agent_norm:
+            breakdown["normalized_match"] = 0.95
+            score = 0.95
+            reasoning = "Normalized exact match"
+        elif expected_norm in agent_norm:
+            breakdown["substring_match"] = 0.8
+            score = 0.8
+            reasoning = "Substring match found after normalization"
+        else:
+            normalized_score = self._normalized_format_match(expected_norm, agent_norm)
+            breakdown["normalized_match"] = normalized_score
+            score = normalized_score
+            reasoning = f"Normalized format match: {normalized_score:.3f}"
 
-        normalized_score = self._normalized_format_match(expected_norm, agent_norm)
+        confidence = self._compute_confidence(breakdown)
         return ScoringResult(
-            score=normalized_score,
-            confidence=0.8,
+            score=score,
+            confidence=confidence,
             method=ScoringMethod.FORMAT_STRICT,
-            breakdown={"normalized_match": normalized_score},
-            reasoning=f"Normalized format match: {normalized_score:.3f}",
+            breakdown=breakdown,
+            reasoning=reasoning,
             suggestions=[],
         )
 
@@ -135,7 +148,14 @@ class EnhancedScoringSystem:
 
         return ScoringResult(
             score=total_score,
-            confidence=0.8,
+            confidence=self._compute_confidence(
+                {
+                    "semantic": semantic_score,
+                    "completeness": completeness_score,
+                    "factual": factual_score,
+                    "relevance": relevance_score,
+                }
+            ),
             method=ScoringMethod.SEMANTIC_FLEXIBLE,
             breakdown={
                 "semantic": semantic_score,
@@ -172,7 +192,14 @@ class EnhancedScoringSystem:
 
         return ScoringResult(
             score=total_score,
-            confidence=0.85,
+            confidence=self._compute_confidence(
+                {
+                    "format": format_score,
+                    "semantic": semantic_score,
+                    "content": content_score,
+                    "factual": factual_score,
+                }
+            ),
             method=ScoringMethod.HYBRID_BALANCED,
             breakdown={
                 "format": format_score,
@@ -213,7 +240,14 @@ class EnhancedScoringSystem:
 
         return ScoringResult(
             score=total_score,
-            confidence=0.9,
+            confidence=self._compute_confidence(
+                {
+                    "key_info": key_info_score,
+                    "factual": factual_score,
+                    "completeness": completeness_score,
+                    "professionalism": professionalism_score,
+                }
+            ),
             method=ScoringMethod.CONTENT_FOCUSED,
             breakdown={
                 "key_info": key_info_score,
@@ -617,3 +651,14 @@ class EnhancedScoringSystem:
         if result.breakdown.get("completeness", 1.0) < 0.5:
             suggestions.append("Ensure all key information is covered")
         return suggestions
+
+    # --- Confidence utility -----------------------------------------------------
+
+    def _compute_confidence(self, components: Dict[str, float]) -> float:
+        if not components:
+            return 0.0
+        strong = sum(1 for value in components.values() if value >= 0.75)
+        moderate = sum(1 for value in components.values() if 0.5 <= value < 0.75)
+        weak = sum(1 for value in components.values() if value < 0.5)
+        confidence = 0.5 + strong * 0.1 + moderate * 0.05 - weak * 0.05
+        return max(0.0, min(1.0, confidence))

@@ -3,9 +3,8 @@ LLM Evaluator for DAB Evaluation SDK
 LLM evaluator for DAB Evaluation SDK
 """
 
-import os
 import json
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from .base_evaluator import BaseEvaluator
 
 try:
@@ -54,12 +53,10 @@ class LLMEvaluator(BaseEvaluator):
             }
         
         try:
-            # Build evaluation prompt
             evaluation_prompt = self._build_evaluation_prompt(
                 question, agent_response, expected_answer, context
             )
-            
-            # Call LLM
+
             response = self.client.chat.completions.create(
                 model=self.model_name,
                 messages=[
@@ -69,35 +66,27 @@ class LLMEvaluator(BaseEvaluator):
                 temperature=self.temperature,
                 max_tokens=self.max_tokens
             )
-            
-            # Parse LLM response
+
             llm_response = response.choices[0].message.content
-            
-            # Try to parse JSON format response
-            try:
-                result = json.loads(llm_response)
-                score = float(result.get("score", 0.0))
-                reasoning = result.get("reasoning", "LLM evaluation completed")
-            except:
-                # If not JSON format, use simple scoring logic
-                score = 0.7 if len(llm_response) > 50 else 0.5
-                reasoning = llm_response[:200]
-            
+            parsed = self._parse_llm_response(llm_response)
+
             return {
-                "score": min(1.0, max(0.0, score)),
-                "reasoning": reasoning,
+                "score": parsed["score"],
+                "reasoning": parsed["reasoning"],
                 "details": {
                     "model_used": self.model_name,
                     "llm_response": llm_response,
+                    "confidence": parsed["confidence"],
+                    "flags": parsed["flags"],
                     "evaluation_method": "llm_based"
                 }
             }
-            
+
         except Exception as e:
             return {
                 "score": 0.0,
                 "reasoning": f"LLM evaluation failed: {str(e)}",
-                "details": {"error": str(e)}
+                "details": {"error": str(e), "evaluation_method": "llm_based"}
             }
     
     def _build_evaluation_prompt(self, 
@@ -131,12 +120,84 @@ Please evaluate the Agent response from the following dimensions:
 
 Please return evaluation results in JSON format:
 {
-    "score": Score between 0.0-1.0,
-    "reasoning": "Detailed evaluation reasoning"
+    "score": 0.0-1.0,
+    "confidence": 0.0-1.0,
+    "reasoning": "Detailed evaluation reasoning",
+    "flags": ["optional issues or notes"]
 }
 """
         
         return prompt
+
+    def _parse_llm_response(self, llm_response: str) -> Dict[str, Any]:
+        """Parse and validate LLM response enforcing schema."""
+
+        fallback_score = 0.5 if len(llm_response or "") < 50 else 0.7
+        fallback_reason = (llm_response or "")[:200]
+
+        try:
+            result = json.loads(llm_response)
+        except json.JSONDecodeError:
+            return {
+                "score": fallback_score,
+                "confidence": 0.4,
+                "reasoning": f"LLM response not valid JSON; fallback applied. Snippet: {fallback_reason}",
+                "flags": ["invalid_json"],
+            }
+
+        score, score_flag = self._extract_float(result, "score", 0.0, 1.0, fallback_score)
+        confidence, confidence_flag = self._extract_float(result, "confidence", 0.0, 1.0, 0.6)
+        reasoning = self._extract_string(result, "reasoning", fallback_reason)
+        flags = self._extract_list(result, "flags", default=[])
+
+        schema_flags = []
+        for flag in (score_flag, confidence_flag):
+            if flag:
+                schema_flags.append(flag)
+        flags.extend(schema_flags)
+
+        if self._contains_uncertainty(reasoning):
+            confidence = min(confidence, 0.4)
+            flags.append("low_confidence_reasoning")
+
+        return {
+            "score": score,
+            "confidence": confidence,
+            "reasoning": reasoning,
+            "flags": flags,
+        }
+
+    def _extract_float(self, payload: Dict[str, Any], key: str, min_value: float, max_value: float, default: float) -> Tuple[float, Optional[str]]:
+        value = payload.get(key)
+        try:
+            num = float(value)
+            if not (min_value <= num <= max_value):
+                return default, f"{key}_out_of_range"
+            return num, None
+        except (TypeError, ValueError):
+            return default, f"{key}_invalid"
+
+    def _extract_string(self, payload: Dict[str, Any], key: str, default: str) -> str:
+        value = payload.get(key)
+        return str(value) if isinstance(value, str) and value.strip() else default
+
+    def _extract_list(self, payload: Dict[str, Any], key: str, default: Optional[List[str]] = None) -> List[str]:
+        value = payload.get(key)
+        if isinstance(value, list) and all(isinstance(item, str) for item in value):
+            return value
+        return default or []
+
+    def _contains_uncertainty(self, text: str) -> bool:
+        lowered = (text or "").lower()
+        uncertainty_tokens = [
+            "unsure",
+            "uncertain",
+            "cannot determine",
+            "not enough information",
+            "insufficient data",
+            "no confidence",
+        ]
+        return any(token in lowered for token in uncertainty_tokens)
     
     def get_capabilities(self) -> List[str]:
         """Get evaluator capabilities"""
