@@ -6,6 +6,7 @@ DAB Evaluation SDK is a Python SDK focused on Web3 Agent evaluation, providing s
 
 - **Intelligent Evaluation Strategy**: Automatically select evaluation methods based on task category and type
 - **Multi-dimensional Evaluation**: Fact accuracy, technical expertise, detail level, source credibility
+- **Context-Aware Fallbacks**: When no reference answer exists, semantic + relevance scoring keeps judgements fair
 - **Hybrid Evaluation**: Combine rule-based and LLM-based evaluation advantages with adaptive weighting
 - **Enhanced Scoring Engine**: Normalizes formats, checks key facts, and provides confidence-aware scores for robust rule evaluation
 - **Comprehensive Statistics**: Category-based performance analysis with detailed success rates and score distribution

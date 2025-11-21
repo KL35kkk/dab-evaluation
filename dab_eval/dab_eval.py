@@ -437,77 +437,40 @@ class DABEvaluator:
         agent_response = task.agent_response
         answer = agent_response.get("answer", "")
         confidence = agent_response.get("confidence", 0.0)
-        
-        # Use multi-dimensional evaluation if expected answer is available
+
+        scoring_context = {
+            "question": task.question,
+            "context": task.context or {},
+            "category": getattr(task.category, "value", str(task.category)),
+        }
+
         if task.expected_answer:
-            # Multi-dimensional evaluation
-            dimensions = self._multi_dimensional_evaluation(task.expected_answer, answer)
-            
-            # Calculate weighted score with stricter standards
-            weights = {
-                "factual_accuracy": 0.4,  # Most important
-                "completeness": 0.25,
-                "precision": 0.15,
-                "relevance": 0.15,
-                "conciseness": 0.05
-            }
-            
-            # Calculate weighted score
-            weighted_score = sum(dimensions[key] * weights[key] for key in weights)
-            
-            # Apply stricter base score (reduce from 0.4-0.5 to 0.2-0.3)
-            base_score = weighted_score * 0.6  # Reduce base score significantly
-            
-            # Apply confidence adjustment (reduced impact)
-            confidence_factor = 0.8 + (confidence * 0.4)  # Range: 0.8-1.2
-            final_score = base_score * confidence_factor
-            
-            # Apply failure penalty if task failed
-            if task.status == EvaluationStatus.FAILED:
-                final_score *= 0.3  # Severe penalty for failed tasks
-            
-            reasoning = f"Multi-dimensional evaluation: factual_accuracy={dimensions['factual_accuracy']:.2f}, completeness={dimensions['completeness']:.2f}, precision={dimensions['precision']:.2f}, relevance={dimensions['relevance']:.2f}, conciseness={dimensions['conciseness']:.2f}; "
-            reasoning += f"Base score: {base_score:.2f}, Confidence factor: {confidence_factor:.2f}; "
-            
+            scoring_result = self.rule_scorer.score_answer(
+                expected=task.expected_answer,
+                agent=answer,
+                method=ScoringMethod.HYBRID_BALANCED,
+                context=scoring_context,
+            )
         else:
-            # Fallback to basic evaluation with stricter standards
-            score = 0.0
-            reasoning = ""
-            
-            # Check for repetitive/meaningless content
-            repetitiveness_penalty = _check_repetitiveness(answer)
-            if repetitiveness_penalty > 0.5:
-                score -= repetitiveness_penalty * 0.3
-                reasoning += f"Repetitive content detected (penalty: {repetitiveness_penalty:.2f}); "
-            
-            # Check for meaningful content vs fluff
-            meaningful_content_score = _check_meaningful_content(answer)
-            score += meaningful_content_score * 0.3  # Reduced weight
-            reasoning += f"Meaningful content: {meaningful_content_score:.2f}; "
-            
-            # Category-based evaluation with reduced weight
-            category_score = _category_based_evaluation(task, answer)
-            score += category_score * 0.2  # Reduced weight
-            reasoning += f"Category-based evaluation: {category_score:.2f}; "
-            
-            # Confidence adjustment (reduced impact)
-            if confidence > 0.8:
-                score += 0.05  # Reduced bonus
-                reasoning += "High confidence; "
-            elif confidence < 0.3:
-                score -= 0.05  # Reduced penalty
-                reasoning += "Low confidence; "
-            
-            # Apply stricter base score
-            final_score = score * 0.5  # Reduce base score significantly
-            
-            # Apply failure penalty if task failed
-            if task.status == EvaluationStatus.FAILED:
-                final_score *= 0.3  # Severe penalty for failed tasks
-        
-        # Ensure score is between 0 and 1
-        final_score = min(1.0, max(0.0, final_score))
-        
+            scoring_result = self.rule_scorer.score_against_question(
+                task.question or "",
+                answer,
+                context=scoring_context,
+            )
+
+        base_score = max(0.0, min(1.0, scoring_result.score * scoring_result.confidence))
+        confidence_factor = 0.9 + (confidence * 0.2)
+        final_score = min(1.0, max(0.0, base_score * confidence_factor))
+
+        if task.status == EvaluationStatus.FAILED:
+            final_score *= 0.3
+
+        dimensions = self._dimensions_from_scoring_result(scoring_result, answer)
+        reasoning = scoring_result.reasoning
+        if scoring_result.suggestions:
+            reasoning += f" | Suggestions: {', '.join(scoring_result.suggestions)}"
+        reasoning += f" | Base score: {base_score:.2f}, Confidence factor: {confidence_factor:.2f}"
+
         return {
             "evaluation_score": final_score,
             "evaluation_reasoning": reasoning,
@@ -518,8 +481,22 @@ class DABEvaluator:
                 "confidence_score": confidence,
                 "processing_time": agent_response.get("processing_time", 0.0),
                 "tools_used": agent_response.get("tools_used", []),
-                "multi_dimensional_scores": dimensions if task.expected_answer else None
+                "dimension_breakdown": dimensions,
             }
+        }
+
+    def _dimensions_from_scoring_result(self, scoring_result, agent_answer: str) -> Dict[str, float]:
+        breakdown = scoring_result.breakdown or {}
+        professionalism = self.rule_scorer._calculate_professionalism(agent_answer)
+        accuracy = breakdown.get("factual") or breakdown.get("semantic") or scoring_result.score
+        completeness = breakdown.get("completeness") or breakdown.get("content") or scoring_result.score
+        usefulness = breakdown.get("content") or scoring_result.score
+        usefulness = min(1.0, 0.6 * (usefulness or scoring_result.score) + 0.4 * professionalism)
+        return {
+            "accuracy": max(0.0, min(1.0, accuracy)),
+            "completeness": max(0.0, min(1.0, completeness)),
+            "professionalism": max(0.0, min(1.0, professionalism)),
+            "usefulness": max(0.0, min(1.0, usefulness)),
         }
     
     async def evaluate_agent(
@@ -839,180 +816,6 @@ class DABEvaluator:
             logger.warning(f"Semantic similarity calculation failed: {e}")
             return 0.0
     
-    def _multi_dimensional_evaluation(self, expected_answer: str, agent_answer: str) -> Dict[str, float]:
-        """Multi-dimensional evaluation of agent response"""
-        if not expected_answer or not agent_answer:
-            return {
-                "factual_accuracy": 0.0,
-                "completeness": 0.0,
-                "precision": 0.0,
-                "relevance": 0.0,
-                "conciseness": 0.0
-            }
-        
-        # 1. Factual Accuracy
-        factual_accuracy = self._evaluate_factual_accuracy(expected_answer, agent_answer)
-        
-        # 2. Completeness
-        completeness = self._evaluate_completeness(expected_answer, agent_answer)
-        
-        # 3. Precision
-        precision = self._evaluate_precision(expected_answer, agent_answer)
-        
-        # 4. Relevance
-        relevance = self._evaluate_relevance(expected_answer, agent_answer)
-        
-        # 5. Conciseness
-        conciseness = self._evaluate_conciseness(agent_answer)
-        
-        return {
-            "factual_accuracy": factual_accuracy,
-            "completeness": completeness,
-            "precision": precision,
-            "relevance": relevance,
-            "conciseness": conciseness
-        }
-    
-    def _evaluate_factual_accuracy(self, expected_answer: str, agent_answer: str) -> float:
-        """Evaluate factual accuracy"""
-        # Extract key facts from expected answer
-        expected_facts = self._extract_facts(expected_answer)
-        agent_facts = self._extract_facts(agent_answer)
-        
-        if not expected_facts:
-            return 0.5  # Neutral if no facts to check
-        
-        # Check for contradictory information
-        contradictions = self._check_contradictions(expected_facts, agent_facts)
-        contradiction_penalty = contradictions * 0.3
-        
-        # Check for correct facts
-        correct_facts = self._count_correct_facts(expected_facts, agent_facts)
-        accuracy_score = correct_facts / len(expected_facts)
-        
-        final_score = max(0.0, accuracy_score - contradiction_penalty)
-        return min(1.0, final_score)
-    
-    def _evaluate_completeness(self, expected_answer: str, agent_answer: str) -> float:
-        """Evaluate completeness of response"""
-        expected_lower = expected_answer.lower()
-        agent_lower = agent_answer.lower()
-        
-        # Check if key information is covered
-        key_terms = self._extract_key_terms(expected_answer)
-        covered_terms = sum(1 for term in key_terms if term in agent_lower)
-        
-        if not key_terms:
-            return 0.5
-        
-        completeness_score = covered_terms / len(key_terms)
-        return min(1.0, completeness_score)
-    
-    def _evaluate_precision(self, expected_answer: str, agent_answer: str) -> float:
-        """Evaluate precision - how much of the answer is relevant"""
-        # Use semantic similarity as precision measure
-        semantic_sim = self._semantic_similarity_evaluation(expected_answer, agent_answer)
-        
-        # Penalize for excessive length (verbose answers)
-        length_penalty = 0.0
-        if len(agent_answer) > len(expected_answer) * 3:
-            length_penalty = 0.2
-        
-        precision_score = semantic_sim - length_penalty
-        return max(0.0, min(1.0, precision_score))
-    
-    def _evaluate_relevance(self, expected_answer: str, agent_answer: str) -> float:
-        """Evaluate relevance to the question"""
-        # Check if answer addresses the same topic
-        expected_topic = self._extract_topic(expected_answer)
-        agent_topic = self._extract_topic(agent_answer)
-        
-        if expected_topic and agent_topic:
-            topic_similarity = self._semantic_similarity_evaluation(expected_topic, agent_topic)
-            return topic_similarity
-        
-        return 0.5  # Neutral if can't determine topic
-    
-    def _evaluate_conciseness(self, agent_answer: str) -> float:
-        """Evaluate conciseness - penalize overly verbose answers"""
-        if len(agent_answer) < 50:
-            return 0.3  # Too short
-        elif len(agent_answer) < 200:
-            return 1.0  # Good length
-        elif len(agent_answer) < 500:
-            return 0.8  # Acceptable
-        elif len(agent_answer) < 1000:
-            return 0.6  # Too verbose
-        else:
-            return 0.3  # Very verbose
-    
-    def _extract_facts(self, text: str) -> List[str]:
-        """Extract factual information from text"""
-        import re
-        
-        facts = []
-        
-        # Extract dates
-        dates = re.findall(r'\d{4}[/-]\d{1,2}[/-]\d{1,2}', text)
-        facts.extend(dates)
-        
-        # Extract numbers/amounts
-        amounts = re.findall(r'\$[\d,]+\.?\d*', text)
-        facts.extend(amounts)
-        
-        # Extract addresses/hashes
-        addresses = re.findall(r'0x[a-fA-F0-9]{40,64}', text)
-        facts.extend(addresses)
-        
-        # Extract percentages
-        percentages = re.findall(r'\d+\.?\d*%', text)
-        facts.extend(percentages)
-        
-        return facts
-    
-    def _check_contradictions(self, expected_facts: List[str], agent_facts: List[str]) -> int:
-        """Check for contradictions between expected and agent facts"""
-        contradictions = 0
-        
-        for expected_fact in expected_facts:
-            # Look for contradictory information
-            if expected_fact.startswith('$'):
-                # Check for different amounts
-                agent_amounts = [fact for fact in agent_facts if fact.startswith('$')]
-                if agent_amounts and expected_fact not in agent_amounts:
-                    contradictions += 1
-        
-        return contradictions
-    
-    def _count_correct_facts(self, expected_facts: List[str], agent_facts: List[str]) -> int:
-        """Count how many expected facts are present in agent facts"""
-        correct_count = 0
-        
-        for expected_fact in expected_facts:
-            if expected_fact in agent_facts:
-                correct_count += 1
-        
-        return correct_count
-    
-    def _extract_key_terms(self, text: str) -> List[str]:
-        """Extract key terms from text"""
-        import re
-        
-        # Extract important words (length > 3, not common words)
-        common_words = {'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'can', 'must', 'a', 'an', 'this', 'that', 'these', 'those'}
-        
-        words = re.findall(r'\b\w+\b', text.lower())
-        key_terms = [word for word in words if len(word) > 3 and word not in common_words]
-        
-        return key_terms[:10]  # Limit to top 10 terms
-    
-    def _extract_topic(self, text: str) -> str:
-        """Extract main topic from text"""
-        # Simple topic extraction - take first sentence or first 50 characters
-        sentences = text.split('.')
-        if sentences:
-            return sentences[0].strip()[:50]
-        return text[:50]
     
     def get_task_status(self, task_id: str) -> Optional[EvaluationTask]:
         """Get task status"""

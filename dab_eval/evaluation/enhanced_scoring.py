@@ -15,6 +15,7 @@ class ScoringMethod(Enum):
     SEMANTIC_FLEXIBLE = "semantic_flexible"  # Semantic-focused comparison
     HYBRID_BALANCED = "hybrid_balanced"      # Balanced blend of signals
     CONTENT_FOCUSED = "content_focused"      # Content-oriented comparison
+    QUESTION_CONTEXT = "question_context"    # Question-aware comparison when expected answer missing
 
 
 @dataclass
@@ -261,6 +262,84 @@ class EnhancedScoringSystem:
                 f"completeness={completeness_score:.3f}, professionalism={professionalism_score:.3f}"
             ),
             suggestions=[],
+        )
+
+    def score_against_question(
+        self,
+        question: str,
+        agent: str,
+        context: Optional[Dict[str, Any]] = None,
+        reference: Optional[str] = None,
+    ) -> ScoringResult:
+        """
+        Score an answer when only the question (or contextual reference) is available.
+        Provides a fairer fallback than heuristic keyword checks.
+        """
+        if not agent or not agent.strip():
+            return ScoringResult(
+                score=0.0,
+                confidence=0.0,
+                method=ScoringMethod.QUESTION_CONTEXT,
+                breakdown={},
+                reasoning="Empty agent answer",
+                suggestions=["Provide an agent answer before scoring"],
+            )
+
+        reference_text = reference or question or ""
+        analysis_target = reference_text if reference_text.strip() else question or ""
+
+        semantic_score = (
+            self._calculate_semantic_similarity(analysis_target, agent)
+            if analysis_target
+            else self._calculate_content_quality(agent)
+        )
+        relevance_score = (
+            self._calculate_relevance(analysis_target, agent) if analysis_target else 0.6
+        )
+        content_score = self._calculate_content_quality(agent)
+        professionalism_score = self._calculate_professionalism(agent)
+        evidence_score = (
+            self._calculate_key_info_similarity(analysis_target, agent) if analysis_target else 0.5
+        )
+
+        weights = {
+            "semantic": 0.4,
+            "relevance": 0.2,
+            "content": 0.2,
+            "professionalism": 0.15,
+            "evidence": 0.05,
+        }
+
+        total_score = (
+            semantic_score * weights["semantic"]
+            + relevance_score * weights["relevance"]
+            + content_score * weights["content"]
+            + professionalism_score * weights["professionalism"]
+            + evidence_score * weights["evidence"]
+        )
+
+        breakdown = {
+            "semantic": semantic_score,
+            "relevance": relevance_score,
+            "content": content_score,
+            "professionalism": professionalism_score,
+            "evidence": evidence_score,
+        }
+
+        reasoning = (
+            "Question-context scoring: "
+            f"semantic={semantic_score:.3f}, relevance={relevance_score:.3f}, "
+            f"content={content_score:.3f}, professionalism={professionalism_score:.3f}, "
+            f"evidence={evidence_score:.3f}"
+        )
+
+        return ScoringResult(
+            score=total_score,
+            confidence=self._compute_confidence(breakdown),
+            method=ScoringMethod.QUESTION_CONTEXT,
+            breakdown=breakdown,
+            reasoning=reasoning,
+            suggestions=self._generate_question_suggestions(breakdown),
         )
 
     # --- Normalization utilities -------------------------------------------------
@@ -650,6 +729,18 @@ class EnhancedScoringSystem:
             suggestions.append("Verify factual accuracy of the answer")
         if result.breakdown.get("completeness", 1.0) < 0.5:
             suggestions.append("Ensure all key information is covered")
+        return suggestions
+
+    def _generate_question_suggestions(self, breakdown: Dict[str, float]) -> List[str]:
+        suggestions: List[str] = []
+        if breakdown.get("semantic", 1.0) < 0.6:
+            suggestions.append("Align the answer more closely with the question intent")
+        if breakdown.get("relevance", 1.0) < 0.6:
+            suggestions.append("Provide details that are directly relevant to the query")
+        if breakdown.get("content", 1.0) < 0.6:
+            suggestions.append("Add more concrete facts or supporting details")
+        if breakdown.get("professionalism", 1.0) < 0.6:
+            suggestions.append("Adopt a more precise and professional tone")
         return suggestions
 
     # --- Confidence utility -----------------------------------------------------

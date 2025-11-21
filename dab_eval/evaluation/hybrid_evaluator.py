@@ -6,7 +6,7 @@ Enhanced hybrid evaluator with improved scoring system
 from typing import Dict, Any, List, Optional, Tuple
 from .base_evaluator import BaseEvaluator
 from .llm_evaluator import LLMEvaluator
-from .enhanced_scoring import EnhancedScoringSystem, ScoringMethod
+from .enhanced_scoring import EnhancedScoringSystem, ScoringMethod, ScoringResult
 
 
 class HybridEvaluator(BaseEvaluator):
@@ -115,19 +115,21 @@ class HybridEvaluator(BaseEvaluator):
                 dimensions = self._dimensions_from_enhanced(enhanced_result, agent_response)
                 return score, enhanced_result.reasoning, dimensions
             except Exception as exc:
-                fallback_score = self._rule_based_evaluation(
+                fallback_result = self._rule_based_evaluation(
                     question, agent_response, expected_answer, context
                 )
-                fallback_dimensions = self._dimensions_from_heuristics(
-                    question, expected_answer or "", agent_response
-                )
+                fallback_score = max(0.0, min(1.0, fallback_result.score * fallback_result.confidence))
+                fallback_dimensions = self._dimensions_from_enhanced(fallback_result, agent_response)
                 return fallback_score, f"Enhanced scoring failed, fallback triggered: {exc}", fallback_dimensions
 
-        score = self._rule_based_evaluation(question, agent_response, expected_answer, context)
-        fallback_dimensions = self._dimensions_from_heuristics(
-            question, expected_answer or "", agent_response
-        )
-        return score, "Enhanced scoring disabled; using traditional rules", fallback_dimensions
+        fallback_result = self._rule_based_evaluation(question, agent_response, expected_answer, context)
+        fallback_score = max(0.0, min(1.0, fallback_result.score * fallback_result.confidence))
+        fallback_dimensions = self._dimensions_from_enhanced(fallback_result, agent_response)
+        if expected_answer:
+            reasoning = "Enhanced scoring disabled; question-context fallback applied"
+        else:
+            reasoning = "No expected answer provided; question-context scoring applied"
+        return fallback_score, reasoning, fallback_dimensions
 
     async def _evaluate_llm_component(
         self,
@@ -160,111 +162,21 @@ class HybridEvaluator(BaseEvaluator):
         agent_response: str,
         expected_answer: Optional[str] = None,
         context: Optional[Dict[str, Any]] = None,
-    ) -> float:
-        """Rule-based evaluation fallback"""
+    ) -> ScoringResult:
+        """Question-context fallback scoring when enhanced scoring is unavailable."""
 
-        if not agent_response:
-            return 0.0
-
-        response_lower = agent_response.lower()
-        response_norm = self.enhanced_scoring.normalize_text(agent_response)
-        expected_norm = self.enhanced_scoring.normalize_text(expected_answer) if expected_answer else ""
-
-        score = 0.0
-        penalties = 0.0
-
-        # Length and structure heuristics
-        response_length = len(agent_response.strip())
-        if response_length >= 120:
-            score += 0.15
-        elif response_length >= 60:
-            score += 0.1
-        elif response_length < 25:
-            penalties += 0.1
-
-        sentences = [s.strip() for s in agent_response.split(".") if s.strip()]
-        if len(sentences) >= 2:
-            score += 0.05
-
-        # Domain specific terms
-        web3_keywords = [
-            "blockchain",
-            "ethereum",
-            "smart contract",
-            "defi",
-            "nft",
-            "web3",
-            "crypto",
-            "bitcoin",
-        ]
-        if any(keyword in response_lower for keyword in web3_keywords):
-            score += 0.15
-
-        tech_keywords = ["analysis", "technology", "protocol", "algorithm", "mechanism", "architecture"]
-        if any(keyword in response_lower for keyword in tech_keywords):
-            score += 0.1
-
-        detail_keywords = ["specific", "detailed", "steps", "method", "principle", "implementation"]
-        if any(keyword in response_lower for keyword in detail_keywords):
-            score += 0.1
-
-        # Key information overlap
-        if expected_answer:
-            expected_info = self.enhanced_scoring.extract_key_information(expected_answer)
-            agent_info = self.enhanced_scoring.extract_key_information(agent_response)
-            if expected_info:
-                matches = sum(
-                    1
-                    for info in expected_info
-                    if any(self.enhanced_scoring.compare_key_information(info, candidate) for candidate in agent_info)
-                )
-                score += 0.4 * (matches / len(expected_info))
-
-            if expected_norm and expected_norm in response_norm:
-                score += 0.15
-            else:
-                penalties += 0.1
-
-        # Context-aware adjustments
-        question_lower = (question or "").lower()
-        is_numeric_question = any(keyword in question_lower for keyword in ["price", "amount", "value", "cost", "quantity", "total"])
-        is_temporal_question = any(keyword in question_lower for keyword in ["date", "when", "time", "timestamp"])
-
-        if context:
-            category = context.get("category", "").lower()
-            if category == "web_retrieval" and any(
-                keyword in response_lower for keyword in ["source", "reference", "according", "cited"]
-            ):
-                score += 0.1
-            elif category == "onchain_retrieval" and any(
-                keyword in response_lower for keyword in ["contract", "address", "hash", "0x", "transaction"]
-            ):
-                score += 0.1
-
-        if is_numeric_question:
-            digits_in_response = any(char.isdigit() for char in agent_response)
-            if digits_in_response:
-                score += 0.1
-            else:
-                penalties += 0.1
-
-        if is_temporal_question:
-            if any(token in response_lower for token in ["202", "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]):
-                score += 0.1
-            else:
-                penalties += 0.1
-
-        # Penalties for uncertain or contradictory language
-        uncertainty_markers = ["not sure", "no idea", "unknown", "cannot", "unable", "uncertain", "n/a"]
-        if any(marker in response_lower for marker in uncertainty_markers):
-            penalties += 0.15
-
-        contradiction_markers = ["does not", "cannot be", "no evidence", "incorrect", "wrong"]
-        if any(marker in response_lower for marker in contradiction_markers) and expected_answer:
-            penalties += 0.1
-
-        final_score = max(0.0, min(1.0, score - penalties))
-        return final_score
+        context_payload = {
+            "question": question,
+            "expected": expected_answer,
+            "context": context or {},
+        }
+        reference = expected_answer or question or ""
+        return self.enhanced_scoring.score_against_question(
+            question or "",
+            agent_response,
+            context=context_payload,
+            reference=reference,
+        )
 
     def _combine_dimension_breakdown(
         self,
@@ -306,23 +218,6 @@ class HybridEvaluator(BaseEvaluator):
             "usefulness": max(0.0, min(1.0, usefulness)),
         }
 
-    def _dimensions_from_heuristics(
-        self,
-        question: str,
-        reference_text: str,
-        agent_response: str,
-    ) -> Dict[str, float]:
-        question_text = reference_text or question or ""
-        accuracy = self.enhanced_scoring._calculate_semantic_similarity(question_text, agent_response)
-        completeness = self.enhanced_scoring._calculate_content_quality(agent_response)
-        professionalism = self.enhanced_scoring._calculate_professionalism(agent_response)
-        usefulness = min(1.0, 0.5 * accuracy + 0.5 * completeness)
-        return {
-            "accuracy": max(0.0, min(1.0, accuracy)),
-            "completeness": max(0.0, min(1.0, completeness)),
-            "professionalism": max(0.0, min(1.0, professionalism)),
-            "usefulness": max(0.0, min(1.0, usefulness)),
-        }
 
     def _calculate_dynamic_weights(self, rule_score: float, llm_score: float) -> Dict[str, Any]:
         """Adjust weights based on confidence and threshold signals."""
