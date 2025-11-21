@@ -3,7 +3,7 @@ Hybrid Evaluator for DAB Evaluation SDK
 Enhanced hybrid evaluator with improved scoring system
 """
 
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from .base_evaluator import BaseEvaluator
 from .llm_evaluator import LLMEvaluator
 from .enhanced_scoring import EnhancedScoringSystem, ScoringMethod
@@ -35,11 +35,11 @@ class HybridEvaluator(BaseEvaluator):
     ) -> Dict[str, Any]:
         """Enhanced hybrid evaluation of Agent response"""
 
-        rule_score, enhanced_reasoning = self._evaluate_rule_component(
+        rule_score, enhanced_reasoning, rule_dimensions = self._evaluate_rule_component(
             question, agent_response, expected_answer, context
         )
 
-        llm_score, llm_reasoning = await self._evaluate_llm_component(
+        llm_score, llm_reasoning, llm_dimensions = await self._evaluate_llm_component(
             question, agent_response, expected_answer, context
         )
 
@@ -55,6 +55,13 @@ class HybridEvaluator(BaseEvaluator):
                 rule_score * weight_context["rule_weight"] + llm_score * effective_llm_weight
             ) / weight_sum
 
+        combined_dimensions = self._combine_dimension_breakdown(
+            rule_dimensions,
+            llm_dimensions,
+            weight_context["rule_weight"],
+            effective_llm_weight,
+        )
+
         reasoning_lines = [
             f"Rule-based evaluation: {rule_score:.2f} (weight: {weight_context['rule_weight']:.2f})",
             f"LLM evaluation: {llm_score:.2f} (weight: {effective_llm_weight:.2f})",
@@ -64,6 +71,11 @@ class HybridEvaluator(BaseEvaluator):
             reasoning_lines.append(threshold_note)
         if self.use_enhanced_scoring and expected_answer:
             reasoning_lines.append(f"Enhanced scoring details: {enhanced_reasoning}")
+        if combined_dimensions:
+            dimension_summary = ", ".join(
+                f"{dim}: {value:.2f}" for dim, value in combined_dimensions.items()
+            )
+            reasoning_lines.append(f"Dimension breakdown -> {dimension_summary}")
 
         return {
             "score": min(1.0, max(0.0, final_score)),
@@ -78,6 +90,7 @@ class HybridEvaluator(BaseEvaluator):
                 "enhanced_scoring": self.use_enhanced_scoring,
                 "enhanced_reasoning": enhanced_reasoning,
                 "weighting_notes": weight_context["notes"],
+                "dimension_breakdown": combined_dimensions,
                 "evaluation_method": "enhanced_hybrid",
             },
         }
@@ -88,7 +101,7 @@ class HybridEvaluator(BaseEvaluator):
         agent_response: str,
         expected_answer: Optional[str],
         context: Optional[Dict[str, Any]],
-    ) -> (float, str):
+    ) -> Tuple[float, str, Dict[str, float]]:
         if self.use_enhanced_scoring and expected_answer:
             try:
                 scoring_method = self._select_optimal_scoring_method(question, expected_answer, context)
@@ -99,15 +112,22 @@ class HybridEvaluator(BaseEvaluator):
                     context={"question": question, "context": context or {}},
                 )
                 score = max(0.0, min(1.0, enhanced_result.score * enhanced_result.confidence))
-                return score, enhanced_result.reasoning
+                dimensions = self._dimensions_from_enhanced(enhanced_result, agent_response)
+                return score, enhanced_result.reasoning, dimensions
             except Exception as exc:
                 fallback_score = self._rule_based_evaluation(
                     question, agent_response, expected_answer, context
                 )
-                return fallback_score, f"Enhanced scoring failed, fallback triggered: {exc}"
+                fallback_dimensions = self._dimensions_from_heuristics(
+                    question, expected_answer or "", agent_response
+                )
+                return fallback_score, f"Enhanced scoring failed, fallback triggered: {exc}", fallback_dimensions
 
         score = self._rule_based_evaluation(question, agent_response, expected_answer, context)
-        return score, "Enhanced scoring disabled; using traditional rules"
+        fallback_dimensions = self._dimensions_from_heuristics(
+            question, expected_answer or "", agent_response
+        )
+        return score, "Enhanced scoring disabled; using traditional rules", fallback_dimensions
 
     async def _evaluate_llm_component(
         self,
@@ -115,9 +135,9 @@ class HybridEvaluator(BaseEvaluator):
         agent_response: str,
         expected_answer: Optional[str],
         context: Optional[Dict[str, Any]],
-    ) -> (float, str):
+    ) -> Tuple[float, str, Dict[str, float]]:
         if not self.use_llm_evaluation:
-            return 0.0, "LLM evaluation disabled"
+            return 0.0, "LLM evaluation disabled", {}
 
         try:
             llm_result = await self.llm_evaluator.evaluate(
@@ -125,11 +145,14 @@ class HybridEvaluator(BaseEvaluator):
             )
             score = float(llm_result.get("score", 0.0))
             reasoning = llm_result.get("reasoning", "")
-            confidence = float(llm_result.get("details", {}).get("confidence", 1.0))
+            details = llm_result.get("details", {}) or {}
+            confidence = float(details.get("confidence", 1.0))
+            llm_dimensions = details.get("dimension_breakdown", {}) or {}
             adjusted_score = max(0.0, min(1.0, score))
-            return adjusted_score * min(1.0, max(0.0, confidence)), reasoning
+            weighted_score = adjusted_score * min(1.0, max(0.0, confidence))
+            return weighted_score, reasoning, llm_dimensions
         except Exception as exc:
-            return 0.0, f"LLM evaluation failed: {exc}"
+            return 0.0, f"LLM evaluation failed: {exc}", {}
 
     def _rule_based_evaluation(
         self,
@@ -242,6 +265,64 @@ class HybridEvaluator(BaseEvaluator):
 
         final_score = max(0.0, min(1.0, score - penalties))
         return final_score
+
+    def _combine_dimension_breakdown(
+        self,
+        rule_dimensions: Dict[str, float],
+        llm_dimensions: Dict[str, float],
+        rule_weight: float,
+        llm_weight: float,
+    ) -> Dict[str, float]:
+        dimensions = {}
+        target_dims = {"accuracy", "completeness", "professionalism", "usefulness"}
+        for dim in target_dims:
+            weighted_sum = 0.0
+            total_weight = 0.0
+            if dim in rule_dimensions:
+                weighted_sum += rule_dimensions[dim] * rule_weight
+                total_weight += rule_weight
+            if dim in llm_dimensions:
+                weighted_sum += llm_dimensions[dim] * llm_weight
+                total_weight += llm_weight
+            if total_weight > 0:
+                dimensions[dim] = max(0.0, min(1.0, weighted_sum / total_weight))
+        return dimensions
+
+    def _dimensions_from_enhanced(
+        self,
+        enhanced_result,
+        agent_response: str,
+    ) -> Dict[str, float]:
+        breakdown = enhanced_result.breakdown or {}
+        professionalism = self.enhanced_scoring._calculate_professionalism(agent_response)
+        accuracy = breakdown.get("factual") or breakdown.get("semantic") or enhanced_result.score
+        completeness = breakdown.get("completeness") or breakdown.get("content") or enhanced_result.score
+        usefulness = breakdown.get("content") or enhanced_result.score
+        usefulness = min(1.0, 0.6 * (usefulness or enhanced_result.score) + 0.4 * professionalism)
+        return {
+            "accuracy": max(0.0, min(1.0, accuracy)),
+            "completeness": max(0.0, min(1.0, completeness)),
+            "professionalism": max(0.0, min(1.0, professionalism)),
+            "usefulness": max(0.0, min(1.0, usefulness)),
+        }
+
+    def _dimensions_from_heuristics(
+        self,
+        question: str,
+        reference_text: str,
+        agent_response: str,
+    ) -> Dict[str, float]:
+        question_text = reference_text or question or ""
+        accuracy = self.enhanced_scoring._calculate_semantic_similarity(question_text, agent_response)
+        completeness = self.enhanced_scoring._calculate_content_quality(agent_response)
+        professionalism = self.enhanced_scoring._calculate_professionalism(agent_response)
+        usefulness = min(1.0, 0.5 * accuracy + 0.5 * completeness)
+        return {
+            "accuracy": max(0.0, min(1.0, accuracy)),
+            "completeness": max(0.0, min(1.0, completeness)),
+            "professionalism": max(0.0, min(1.0, professionalism)),
+            "usefulness": max(0.0, min(1.0, usefulness)),
+        }
 
     def _calculate_dynamic_weights(self, rule_score: float, llm_score: float) -> Dict[str, Any]:
         """Adjust weights based on confidence and threshold signals."""

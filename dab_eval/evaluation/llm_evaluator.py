@@ -4,6 +4,7 @@ LLM evaluator for DAB Evaluation SDK
 """
 
 import json
+import re
 from typing import Dict, Any, List, Optional, Tuple
 from .base_evaluator import BaseEvaluator
 
@@ -18,14 +19,20 @@ class LLMEvaluator(BaseEvaluator):
     
     def __init__(self, config: Dict[str, Any] = None):
         super().__init__(config)
-        self.model_name = config.get("model") if config and config.get("model") else None
-        self.temperature = config.get("temperature", 0.3) if config else 0.3
-        self.max_tokens = config.get("max_tokens", 2000) if config else 2000
-        
+        config = config or {}
+        self.model_name = config.get("model")
+        self.temperature = config.get("temperature", 0.3)
+        self.max_tokens = config.get("max_tokens", 2000)
+        self.num_samples = max(1, int(config.get("num_samples", 1)))
+        self.max_retries = max(0, int(config.get("max_retries", 2)))
+        self.require_valid_json = config.get("require_valid_json", True)
+        self.enforce_schema = config.get("enforce_schema", True)
+        self.retry_invalid_json = config.get("retry_invalid_json", True)
+
         self.client = None
-        if config and config.get("client"):
+        if config.get("client"):
             self.client = config["client"]
-        elif OPENAI_AVAILABLE and config and config.get("api_key"):
+        elif OPENAI_AVAILABLE and config.get("api_key"):
             base_url = config.get("base_url")
             if base_url:
                 self.client = OpenAI(base_url=base_url, api_key=config["api_key"])
@@ -56,31 +63,18 @@ class LLMEvaluator(BaseEvaluator):
             evaluation_prompt = self._build_evaluation_prompt(
                 question, agent_response, expected_answer, context
             )
+            messages = [
+                {"role": "system", "content": "You are a professional Web3 Agent evaluation expert. Always follow the response schema exactly."},
+                {"role": "user", "content": evaluation_prompt},
+            ]
 
-            response = self.client.chat.completions.create(
-                model=self.model_name,
-                messages=[
-                    {"role": "system", "content": "You are a professional Web3 Agent evaluation expert."},
-                    {"role": "user", "content": evaluation_prompt}
-                ],
-                temperature=self.temperature,
-                max_tokens=self.max_tokens
-            )
+            sample_results = []
+            for sample_index in range(self.num_samples):
+                sample_results.append(
+                    self._evaluate_single_sample(messages, sample_index)
+                )
 
-            llm_response = response.choices[0].message.content
-            parsed = self._parse_llm_response(llm_response)
-
-            return {
-                "score": parsed["score"],
-                "reasoning": parsed["reasoning"],
-                "details": {
-                    "model_used": self.model_name,
-                    "llm_response": llm_response,
-                    "confidence": parsed["confidence"],
-                    "flags": parsed["flags"],
-                    "evaluation_method": "llm_based"
-                }
-            }
+            return self._aggregate_samples(sample_results)
 
         except Exception as e:
             return {
@@ -112,43 +106,100 @@ Agent Response: {agent_response}
         
         prompt += """
 
-Please evaluate the Agent response from the following dimensions:
-1. Accuracy: Whether the response accurately answers the question
-2. Completeness: Whether the response is complete and contains necessary information
-3. Professionalism: Whether the response demonstrates Web3 professional knowledge
-4. Usefulness: Whether the response is helpful to users
+Please score along the following dimensions (0.0-1.0):
+- accuracy: Does the response answer the question correctly?
+- completeness: Does it cover key details?
+- professionalism: Does it demonstrate domain knowledge?
+- usefulness: Will the user benefit from it?
 
-Please return evaluation results in JSON format:
+Return a single JSON object only (no markdown). Schema:
 {
-    "score": 0.0-1.0,
-    "confidence": 0.0-1.0,
-    "reasoning": "Detailed evaluation reasoning",
-    "flags": ["optional issues or notes"]
+  "score": <float 0-1>,
+  "confidence": <float 0-1>,
+  "reasoning": "Concise justification referencing evidence",
+  "flags": ["optional issues"],
+  "dimensions": {
+    "accuracy": <float 0-1>,
+    "completeness": <float 0-1>,
+    "professionalism": <float 0-1>,
+    "usefulness": <float 0-1>
+  }
 }
+If information is insufficient, set confidence <= 0.3 and explain why.
 """
         
         return prompt
 
+    def _evaluate_single_sample(self, messages: List[Dict[str, str]], sample_index: int) -> Dict[str, Any]:
+        """Run one LLM evaluation sample with retries for structured output."""
+
+        last_error = ""
+        last_response = ""
+        for attempt in range(self.max_retries + 1):
+            try:
+                llm_response = self._call_llm(messages)
+                last_response = llm_response
+                parsed = self._parse_llm_response(llm_response)
+                if parsed["valid"] or not self.require_valid_json:
+                    if not parsed["valid"]:
+                        parsed["valid"] = True
+                    parsed.update(
+                        {
+                            "raw_response": llm_response,
+                            "sample_index": sample_index,
+                            "attempt": attempt + 1,
+                        }
+                    )
+                    return parsed
+                last_error = parsed["reasoning"]
+            except Exception as exc:
+                last_error = f"LLM invocation failed: {exc}"
+            if not self.retry_invalid_json:
+                break
+
+        return {
+            "score": 0.0,
+            "confidence": 0.0,
+            "reasoning": f"Failed to obtain valid JSON after {self.max_retries + 1} attempts. Last issue: {last_error}",
+            "flags": ["invalid_llm_response"],
+            "raw_response": last_response,
+            "sample_index": sample_index,
+            "attempt": self.max_retries + 1,
+            "valid": False,
+        }
+
+    def _call_llm(self, messages: List[Dict[str, str]]) -> str:
+        response = self.client.chat.completions.create(
+            model=self.model_name,
+            messages=messages,
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
+        )
+        return response.choices[0].message.content
+
     def _parse_llm_response(self, llm_response: str) -> Dict[str, Any]:
         """Parse and validate LLM response enforcing schema."""
 
-        fallback_score = 0.5 if len(llm_response or "") < 50 else 0.7
-        fallback_reason = (llm_response or "")[:200]
-
+        normalized = self._extract_json_blob(llm_response)
         try:
-            result = json.loads(llm_response)
+            result = json.loads(normalized)
         except json.JSONDecodeError:
             return {
-                "score": fallback_score,
-                "confidence": 0.4,
-                "reasoning": f"LLM response not valid JSON; fallback applied. Snippet: {fallback_reason}",
+                "score": 0.0,
+                "confidence": 0.0,
+                "reasoning": "LLM response not valid JSON; retry required.",
                 "flags": ["invalid_json"],
+                "dimensions": {},
+                "valid": False,
             }
 
-        score, score_flag = self._extract_float(result, "score", 0.0, 1.0, fallback_score)
-        confidence, confidence_flag = self._extract_float(result, "confidence", 0.0, 1.0, 0.6)
+        fallback_reason = (llm_response or "")[:200]
+
+        score, score_flag = self._extract_float(result, "score", 0.0, 1.0, 0.0)
+        confidence, confidence_flag = self._extract_float(result, "confidence", 0.0, 1.0, 0.0)
         reasoning = self._extract_string(result, "reasoning", fallback_reason)
         flags = self._extract_list(result, "flags", default=[])
+        dimensions = result.get("dimensions") if isinstance(result.get("dimensions"), dict) else {}
 
         schema_flags = []
         for flag in (score_flag, confidence_flag):
@@ -165,7 +216,87 @@ Please return evaluation results in JSON format:
             "confidence": confidence,
             "reasoning": reasoning,
             "flags": flags,
+            "dimensions": dimensions,
+            "valid": self._is_valid_payload(score_flag, confidence_flag, reasoning),
         }
+
+    def _aggregate_samples(self, samples: List[Dict[str, Any]]) -> Dict[str, Any]:
+        valid_samples = [sample for sample in samples if sample.get("valid", True)]
+
+        dimension_scores: Dict[str, float] = {}
+
+        if valid_samples:
+            scores = [sample["score"] for sample in valid_samples]
+            confidences = [sample.get("confidence", 0.0) for sample in valid_samples]
+            aggregated_score = self._trimmed_mean(scores)
+            aggregated_confidence = sum(confidences) / len(confidences)
+            combined_reasoning = " | ".join(
+                f"Sample {sample['sample_index'] + 1}: {sample['reasoning']}"
+                for sample in valid_samples
+            )
+            flags = sorted({flag for sample in valid_samples for flag in sample.get("flags", [])})
+            for sample in valid_samples:
+                for dimension, value in (sample.get("dimensions") or {}).items():
+                    try:
+                        dimension_scores.setdefault(dimension, []).append(float(value))
+                    except (TypeError, ValueError):
+                        continue
+        else:
+            aggregated_score = 0.0
+            aggregated_confidence = 0.0
+            combined_reasoning = samples[0]["reasoning"] if samples else "LLM evaluation failed."
+            flags = ["no_valid_llm_sample"]
+
+        details = {
+            "model_used": self.model_name,
+            "confidence": aggregated_confidence,
+            "flags": flags,
+            "evaluation_method": "llm_based",
+            "samples": samples,
+            "sample_count": len(samples),
+            "valid_sample_count": len(valid_samples),
+        }
+
+        if dimension_scores:
+            details["dimension_breakdown"] = {
+                name: self._trimmed_mean(values) for name, values in dimension_scores.items()
+            }
+
+        # Retain backward-compatible field for the first raw response
+        if samples:
+            details["llm_response"] = samples[0].get("raw_response", "")
+
+        return {
+            "score": aggregated_score,
+            "reasoning": combined_reasoning,
+            "details": details,
+        }
+
+    def _trimmed_mean(self, values: List[float]) -> float:
+        if not values:
+            return 0.0
+        if len(values) < 3:
+            return sum(values) / len(values)
+        sorted_values = sorted(values)
+        trimmed = sorted_values[1:-1]
+        return sum(trimmed) / len(trimmed) if trimmed else sum(sorted_values) / len(sorted_values)
+
+    def _extract_json_blob(self, text: str) -> str:
+        if not text:
+            return ""
+        snippet = text.strip()
+        if snippet.startswith("```"):
+            snippet = re.sub(r"^```[a-zA-Z0-9]*", "", snippet).strip("` \n")
+        start = snippet.find("{")
+        end = snippet.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            return snippet[start : end + 1]
+        return snippet
+
+    def _is_valid_payload(self, score_flag: Optional[str], confidence_flag: Optional[str], reasoning: str) -> bool:
+        if not self.enforce_schema:
+            return True
+        return score_flag is None and confidence_flag is None and bool(reasoning.strip())
 
     def _extract_float(self, payload: Dict[str, Any], key: str, min_value: float, max_value: float, default: float) -> Tuple[float, Optional[str]]:
         value = payload.get(key)

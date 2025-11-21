@@ -28,6 +28,17 @@ The SDK does not ship with any credentials or LLM defaults. You must provide one
 - Or provide `llm_config["api_key"]`, `llm_config["model"]`, and optionally `llm_config["base_url"]`; the SDK will build the client for you.
 - As a fallback, set the `ARK_API_KEY` environment variable together with `llm_config["model"]` and, if needed, `llm_config["base_url"]` before running the SDK.
 
+To keep evaluations reproducible and fair, the LLM evaluator now accepts a few reliability-focused options:
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `num_samples` | `1` | Number of independent LLM judgments to gather before aggregation. Useful for reducing variance. |
+| `max_retries` | `2` | How many times to re-ask the model when it fails to return valid JSON. |
+| `require_valid_json` | `True` | When `True`, invalid responses are dropped and re-tried rather than silently scored. |
+| `retry_invalid_json` | `True` | Disable if you want a single pass even when the output is malformed. |
+
+Each sample stores a raw response plus schema flags, and the final result exposes trimmed-mean aggregate scores in `details["samples"]` and `details["dimension_breakdown"]`.
+
 ### Basic Usage
 
 ```python
@@ -104,8 +115,9 @@ asyncio.run(main())
 
 The default `DABEvaluator` now builds on the enhanced hybrid evaluator within `dab_eval.evaluation`. The hybrid workflow:
 - Normalises dates / numbers / addresses before matching expected answers.
-- Multiplies rule-based scores by model confidence.
+- Multiplies rule-based scores by calibrated confidence and blends them with LLM scores only when the LLM output is well-formed.
 - Drops LLM scores that fall below the configured `llm_evaluation_threshold`.
+- Surfaces multi-dimensional metrics (`accuracy`, `completeness`, `professionalism`, `usefulness`) by merging rule and LLM evidence so you can audit how a score was produced.
 
 If you need to tweak settings while using `DABEvaluator`, access the underlying evaluator via `evaluator.evaluators["hybrid"]` and adjust its attributes (for example, `llm_evaluation_threshold` or `rule_based_weight`).
 

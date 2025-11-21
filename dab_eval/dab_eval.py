@@ -403,6 +403,8 @@ class DABEvaluator:
                     enhanced_result = self._enhance_evaluation_with_expected_answer(
                         evaluation_result, task.expected_answer, answer
                     )
+
+                    evaluator_details = evaluation_result.get("details", {}) or {}
                     
                     return {
                         "evaluation_score": enhanced_result.get("score", evaluation_result.get("score", 0.0)),
@@ -414,7 +416,8 @@ class DABEvaluator:
                             "confidence_score": confidence,
                             "processing_time": agent_response.get("processing_time", 0.0),
                             "tools_used": agent_response.get("tools_used", []),
-                            "evaluator_details": evaluation_result.get("details", {}),
+                            "evaluator_details": evaluator_details,
+                            "dimension_breakdown": evaluator_details.get("dimension_breakdown", {}),
                             "expected_answer_analysis": enhanced_result.get("expected_answer_analysis", {})
                         }
                     }
