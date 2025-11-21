@@ -119,6 +119,7 @@ The default `DABEvaluator` now builds on the enhanced hybrid evaluator within `d
 - Multiplies rule-based scores by calibrated confidence and blends them with LLM scores only when the LLM output is well-formed.
 - Drops LLM scores that fall below the configured `llm_evaluation_threshold`.
 - Surfaces multi-dimensional metrics (`accuracy`, `completeness`, `professionalism`, `usefulness`) by merging rule and LLM evidence so you can audit how a score was produced.
+- Falls back to a semantic + relevance scoring scheme (shared with the base evaluator) whenever no expected answer is provided, so concise but accurate replies are not penalised for lacking keywords.
 
 If you need to tweak settings while using `DABEvaluator`, access the underlying evaluator via `evaluator.evaluators["hybrid"]` and adjust its attributes (for example, `llm_evaluation_threshold` or `rule_based_weight`).
 
