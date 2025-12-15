@@ -1,34 +1,34 @@
-# 🧭 DAB Evaluation SDK
+# DAB Evaluation SDK
 
 A lightweight Python framework for evaluating Web3 agents, designed to assess agent capabilities and performance across various task categories with intelligent evaluation strategies.
 
-## 📋 Overview
+## Overview
 
 DAB Evaluation SDK provides a flexible, configuration-driven approach to agent evaluation. Whether you're testing a single agent on a specific question or running comprehensive benchmarks across entire datasets, the SDK adapts to your needs with automatic method selection, multi-dimensional scoring, and detailed analytics.
 
 The framework intelligently combines rule-based precision with LLM-based understanding, ensuring fair and accurate assessments even when reference answers aren't available. Built with modularity in mind, it separates evaluation logic, task execution, and result summarization for maximum flexibility and extensibility.
 
-## ✨ Key Capabilities
+## Key Capabilities
 
-**🎯 Smart Evaluation Selection** - The SDK automatically chooses the most appropriate evaluation method based on your task category. Web retrieval tasks benefit from precise rule-based matching, while complex reasoning tasks leverage LLM understanding. For tasks requiring both precision and comprehension, a hybrid approach seamlessly combines both methods.
+**Smart Evaluation Selection** - The SDK automatically chooses the most appropriate evaluation method based on your task category. Web retrieval tasks benefit from precise rule-based matching, while complex reasoning tasks leverage LLM understanding. For tasks requiring both precision and comprehension, a hybrid approach seamlessly combines both methods.
 
-**📊 Multi-Dimensional Assessment** - Beyond simple correctness scores, the framework evaluates responses across multiple dimensions including factual accuracy, technical expertise, completeness, and relevance. This gives you a comprehensive view of agent performance, not just a binary pass/fail.
+**Multi-Dimensional Assessment** - Beyond simple correctness scores, the framework evaluates responses across multiple dimensions including factual accuracy, technical expertise, completeness, and relevance. This gives you a comprehensive view of agent performance, not just a binary pass/fail.
 
-**🔧 Adaptive Scoring** - When reference answers are available, the system performs detailed format normalization, key fact extraction, and semantic matching. When they're not, it falls back to intelligent semantic and relevance scoring, ensuring concise but accurate responses aren't unfairly penalized.
+**Adaptive Scoring** - When reference answers are available, the system performs detailed format normalization, key fact extraction, and semantic matching. When they're not, it falls back to intelligent semantic and relevance scoring, ensuring concise but accurate responses aren't unfairly penalized.
 
-**📈 Comprehensive Analytics** - Results are automatically aggregated with category-based statistics, success rate analysis, and score distributions. Export to JSON or CSV formats for further analysis or reporting.
+**Comprehensive Analytics** - Results are automatically aggregated with category-based statistics, success rate analysis, and score distributions. Export to JSON or CSV formats for further analysis or reporting.
 
-**⚙️ Configuration-Driven** - Define your evaluation setup through clean configuration files (JSON or Python), making it easy to reproduce experiments, share evaluation setups, and manage different testing scenarios.
+**Configuration-Driven** - Define your evaluation setup through clean configuration files (JSON or Python), making it easy to reproduce experiments, share evaluation setups, and manage different testing scenarios.
 
-## 🚀 Quick Start
+## Quick Start
 
-### 📦 Installation
+### Installation
 
 ```bash
 pip install httpx openai sentence-transformers scikit-learn numpy
 ```
 
-### 💻 Basic Usage
+### Basic Usage
 
 The SDK uses a configuration-driven approach. Start by creating a configuration:
 
@@ -94,7 +94,7 @@ async def main():
 asyncio.run(main())
 ```
 
-### 📚 Dataset Evaluation
+### Dataset Evaluation
 
 Evaluate your agent against a complete benchmark dataset:
 
@@ -130,7 +130,16 @@ async def evaluate_dataset():
 asyncio.run(evaluate_dataset())
 ```
 
-## ⚙️ Configuration
+## Configuration
+
+The SDK uses a **separated configuration architecture** that distinguishes between business and infrastructure configurations:
+
+- **Business Config**: LLM, Agent, Dataset, Evaluator settings
+- **Infrastructure Config**: Runner, Storage, and system-level settings
+
+This separation allows you to reuse infrastructure configurations across different evaluation scenarios.
+
+### Configuration Structure
 
 The SDK supports both JSON and Python configuration files. Here's a complete example:
 
@@ -172,71 +181,72 @@ The SDK supports both JSON and Python configuration files. Here's a complete exa
 
 See `configs/example_config.py` for a Python-based configuration example.
 
-## 🔍 Evaluation Methods
+## Evaluation Methods
 
 The SDK automatically selects evaluation methods based on task categories, but you can also specify them explicitly:
 
-### 📏 Rule-Based Evaluation
+### Rule-Based Evaluation
 Best for tasks requiring precise matching, such as:
-- ✅ Factual Q&A with specific answers
-- 📅 Event timeline extraction
-- 🔧 Technical parameter queries
+- Factual Q&A with specific answers
+- Event timeline extraction
+- Technical parameter queries
 
-### 🤖 LLM-Based Evaluation
+### LLM-Based Evaluation
 Ideal for tasks requiring understanding and reasoning:
-- 📝 Abstractive summarization
-- 💡 Complex technical explanations
-- 🔀 Disambiguation tasks
+- Abstractive summarization
+- Complex technical explanations
+- Disambiguation tasks
 
-### 🔄 Hybrid Evaluation
+### Hybrid Evaluation
 Combines both approaches for tasks needing both precision and comprehension:
-- ✅ Cross-source verification
-- 🧩 Multi-step reasoning
-- 📋 Tasks with both factual and explanatory components
+- Cross-source verification
+- Multi-step reasoning
+- Tasks with both factual and explanatory components
 
-## 📊 Results and Analytics
+## Results and Analytics
 
 The SDK provides comprehensive result analysis:
 
-**📈 Overall Statistics:**
+**Overall Statistics:**
 - Total tasks, success/failure rates
 - Average scores and confidence levels
 - Processing time metrics
 
-**📑 Category Breakdown:**
+**Category Breakdown:**
 - Performance by task category
 - Success rates per category
 - Average scores per category
 
-**🎯 Score Distribution:**
-- ⭐ Excellent (≥0.8)
-- ✅ Good (0.6-0.8)
-- ⚠️ Fair (0.4-0.6)
-- ❌ Poor (<0.4)
+**Score Distribution:**
+- Excellent (≥0.8)
+- Good (0.6-0.8)
+- Fair (0.4-0.6)
+- Poor (<0.4)
 
 Results are exported in both JSON (detailed) and CSV (tabular) formats for easy analysis and reporting.
 
-## 🏗️ Architecture
+## Architecture
 
 The SDK follows a modular architecture inspired by industry best practices:
 
-- **🔬 EvaluationEngine**: Core evaluation logic and method selection
-- **🏃 Runner**: Task execution and scheduling (supports local and distributed execution)
-- **📋 Summarizer**: Result aggregation and statistical analysis
-- **⚙️ Config System**: Centralized configuration management
+- **EvaluationEngine**: Core evaluation logic and method selection
+- **Runner**: Task execution and scheduling (supports local and distributed execution)
+- **Summarizer**: Result aggregation and statistical analysis
+- **Config System**: Centralized configuration management
 
 This separation of concerns makes the framework easy to extend, test, and customize for your specific needs.
 
-## 📖 Examples
+## Examples
 
 Check out the `examples/` directory for complete working examples:
 
-- 📝 `basic_usage.py` - Simple single-question evaluation
-- 🔄 `batch_evaluation.py` - Batch processing with custom logic
-- ⚙️ `config_based_evaluation.py` - Using configuration files
-- 📊 `enhanced_batch_evaluation.py` - Advanced batch evaluation with statistics
+- `basic_usage.py` - Simple single-question evaluation
+- `batch_evaluation.py` - Batch processing with custom logic
+- `config_based_evaluation.py` - Using configuration files
+- `enhanced_batch_evaluation.py` - Advanced batch evaluation with statistics
+- `evaluate_accuracy.py` - Evaluation system accuracy analysis
 
-## 📚 API Reference
+## API Reference
 
 ### DABEvaluator
 
@@ -267,19 +277,30 @@ evaluator = DABEvaluator(config: EvaluationConfig)
 - `EvaluationMethod`: `RULE_BASED`, `LLM_BASED`, `HYBRID`
 - `EvaluationStatus`: `PENDING`, `IN_PROGRESS`, `COMPLETED`, `FAILED`
 
-## 📦 Requirements
+## Requirements
 
-- 🐍 Python 3.8+
-- 🌐 httpx
-- 🤖 openai (or compatible API client)
-- 🔤 sentence-transformers
-- 📊 scikit-learn
-- 🔢 numpy
+- Python 3.8+
+- httpx
+- openai (or compatible API client)
+- sentence-transformers
+- scikit-learn
+- numpy
 
-## 📄 License
+## Evaluation Accuracy
+
+The SDK includes tools for analyzing the accuracy of the evaluation system itself. Use `EvaluationAccuracyAnalyzer` to:
+
+- Measure consistency across multiple evaluation runs
+- Detect biases (length, category, score clustering)
+- Analyze confidence-accuracy correlation
+- Identify false positives and false negatives
+
+See `examples/evaluate_accuracy.py` for usage examples and `EVALUATION_ACCURACY.md` for detailed documentation.
+
+## License
 
 MIT License
 
-## 🤝 Contributing
+## Contributing
 
 Contributions are welcome! Please feel free to submit issues or pull requests.
