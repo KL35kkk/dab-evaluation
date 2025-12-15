@@ -1,384 +1,285 @@
-# DAB Evaluation SDK - Web3 Agent Evaluation SDK
+# DAB Evaluation SDK
 
-DAB Evaluation SDK is a Python SDK focused on Web3 Agent evaluation, providing simple APIs to evaluate Agent capabilities and performance.
+A comprehensive Python framework for evaluating Web3 agents, designed to assess agent capabilities and performance across various task categories with intelligent evaluation strategies.
 
-## Features
+## Overview
 
-- **Intelligent Evaluation Strategy**: Automatically select evaluation methods based on task category and type
-- **Multi-dimensional Evaluation**: Fact accuracy, technical expertise, detail level, source credibility
-- **Context-Aware Fallbacks**: When no reference answer exists, semantic + relevance scoring keeps judgements fair
-- **Hybrid Evaluation**: Combine rule-based and LLM-based evaluation advantages with adaptive weighting
-- **Enhanced Scoring Engine**: Normalizes formats, checks key facts, and provides confidence-aware scores for robust rule evaluation
-- **Comprehensive Statistics**: Category-based performance analysis with detailed success rates and score distribution
-- **Enum-based API**: Use enums instead of strings for better type safety
-- **Configurable LLM**: Support custom LLM configurations
-- **Automatic Export**: Results automatically saved to specified output directory
+DAB Evaluation SDK provides a flexible, configuration-driven approach to agent evaluation. Whether you're testing a single agent on a specific question or running comprehensive benchmarks across entire datasets, the SDK adapts to your needs with automatic method selection, multi-dimensional scoring, and detailed analytics.
+
+The framework intelligently combines rule-based precision with LLM-based understanding, ensuring fair and accurate assessments even when reference answers aren't available. Built with modularity in mind, it separates evaluation logic, task execution, and result summarization for maximum flexibility and extensibility.
+
+## Key Capabilities
+
+**Smart Evaluation Selection** - The SDK automatically chooses the most appropriate evaluation method based on your task category. Web retrieval tasks benefit from precise rule-based matching, while complex reasoning tasks leverage LLM understanding. For tasks requiring both precision and comprehension, a hybrid approach seamlessly combines both methods.
+
+**Multi-Dimensional Assessment** - Beyond simple correctness scores, the framework evaluates responses across multiple dimensions including factual accuracy, technical expertise, completeness, and relevance. This gives you a comprehensive view of agent performance, not just a binary pass/fail.
+
+**Adaptive Scoring** - When reference answers are available, the system performs detailed format normalization, key fact extraction, and semantic matching. When they're not, it falls back to intelligent semantic and relevance scoring, ensuring concise but accurate responses aren't unfairly penalized.
+
+**Comprehensive Analytics** - Results are automatically aggregated with category-based statistics, success rate analysis, and score distributions. Export to JSON or CSV formats for further analysis or reporting.
+
+**Configuration-Driven** - Define your evaluation setup through clean configuration files (JSON or Python), making it easy to reproduce experiments, share evaluation setups, and manage different testing scenarios.
 
 ## Quick Start
 
-### Install Dependencies
+### Installation
 
 ```bash
-pip install httpx openai
+pip install httpx openai sentence-transformers scikit-learn numpy
 ```
-
-### Configure LLM Access
-
-The SDK does not ship with any credentials or LLM defaults. You must provide one of the following when constructing `DABEvaluator`:
-- Pass an OpenAI-compatible client instance via `llm_config["client"]`.
-- Or provide `llm_config["api_key"]`, `llm_config["model"]`, and optionally `llm_config["base_url"]`; the SDK will build the client for you.
-- As a fallback, set the `ARK_API_KEY` environment variable together with `llm_config["model"]` and, if needed, `llm_config["base_url"]` before running the SDK.
-
-To keep evaluations reproducible and fair, the LLM evaluator now accepts a few reliability-focused options:
-
-| Key | Default | Description |
-| --- | --- | --- |
-| `num_samples` | `1` | Number of independent LLM judgments to gather before aggregation. Useful for reducing variance. |
-| `max_retries` | `2` | How many times to re-ask the model when it fails to return valid JSON. |
-| `require_valid_json` | `True` | When `True`, invalid responses are dropped and re-tried rather than silently scored. |
-| `retry_invalid_json` | `True` | Disable if you want a single pass even when the output is malformed. |
-
-Each sample stores a raw response plus schema flags, and the final result exposes trimmed-mean aggregate scores in `details["samples"]` and `details["dimension_breakdown"]`.
 
 ### Basic Usage
 
+The SDK uses a configuration-driven approach. Start by creating a configuration:
+
 ```python
 import asyncio
-from dab_eval import DABEvaluator, AgentMetadata, TaskCategory
+import os
+from dab_eval import (
+    DABEvaluator,
+    EvaluationConfig,
+    LLMConfig,
+    AgentConfig,
+    DatasetConfig,
+    AgentMetadata,
+    TaskCategory,
+    load_config
+)
 
 async def main():
-    # LLM configuration
-    llm_config = {
-        "model": "doubao-seed-1-6",
-        "temperature": 0.3,
-        "max_tokens": 2000,
-        "api_key": os.environ["ARK_API_KEY"],
-        "base_url": ""
-    }
+    # Option 1: Load from config file
+    config = load_config("configs/example_config.json")
     
-    # Create SDK instance with LLM config and output path
-    evaluator = DABEvaluator(llm_config, "output")  # Uses enhanced hybrid evaluation by default
-    
-    # Define Agent
-    agent = AgentMetadata(
-        url="http://localhost:8002",
-        capabilities=[TaskCategory.ONCHAIN_RETRIEVAL],
-        timeout=30
+    # Option 2: Create programmatically
+    config = EvaluationConfig(
+        llm_config=LLMConfig(
+            model="gpt-4",
+            base_url="https://api.openai.com/v1",
+            api_key=os.environ.get("OPENAI_API_KEY", ""),
+            temperature=0.3,
+            max_tokens=2000
+        ),
+        agent_config=AgentConfig(
+            url="http://localhost:8002",
+            capabilities=[TaskCategory.WEB_RETRIEVAL, TaskCategory.ONCHAIN_RETRIEVAL],
+            timeout=30
+        ),
+        dataset_config=DatasetConfig(),
+        work_dir="output"
     )
     
-    # Evaluate Agent using enums
+    # Create evaluator
+    evaluator = DABEvaluator(config)
+    
+    # Define your agent
+    agent = AgentMetadata(
+        url="http://localhost:8002",
+        capabilities=[TaskCategory.WEB_RETRIEVAL],
+        timeout=30,
+        close_endpoint="http://localhost:8002/close"
+    )
+    
+    # Evaluate a single question
     result = await evaluator.evaluate_agent(
         question="What is the date (UTC) when the US SEC approved Bitcoin spot ETF?",
         agent_metadata=agent,
-        category=TaskCategory.WEB_RETRIEVAL
+        category=TaskCategory.WEB_RETRIEVAL,
+        expected_answer="2024/1/10"
     )
     
-    print(f"Evaluation Score: {result.evaluation_score}")
-    print(f"Agent Response: {result.agent_response}")
+    print(f"Score: {result.evaluation_score:.2f}")
+    print(f"Response: {result.agent_response}")
+    print(f"Reasoning: {result.evaluation_reasoning}")
 
-# Dataset-based evaluation
-async def dataset_evaluation():
-    """Evaluate Agent using dataset"""
-    # LLM configuration
-    llm_config = {
-        "model": "doubao-seed-1-6-251015",
-        "base_url": "https://ark.cn-beijing.volces.com/api/v3",
-        "api_key": os.environ.get("ARK_API_KEY", "your_api_key_here"),
-        "temperature": 0.3,
-        "max_tokens": 2000
-    }
+asyncio.run(main())
+```
+
+### Dataset Evaluation
+
+Evaluate your agent against a complete benchmark dataset:
+
+```python
+async def evaluate_dataset():
+    config = load_config("configs/example_config.json")
+    evaluator = DABEvaluator(config)
     
-    # Create SDK instance
-    evaluator = DABEvaluator(llm_config, "output")
-    
-    # Define Agent
     agent = AgentMetadata(
         url="http://localhost:8002",
         capabilities=[TaskCategory.WEB_RETRIEVAL, TaskCategory.ONCHAIN_RETRIEVAL],
         timeout=30
     )
     
-    # Evaluate using dataset
+    # Evaluate against benchmark
     results = await evaluator.evaluate_agent_with_dataset(
         agent_metadata=agent,
         dataset_path="data/benchmark.csv",
-        max_tasks=5  # Limit to first 5 tasks
+        max_tasks=10  # Optional: limit number of tasks
     )
     
-    # Export results
-    export_data = evaluator.export_results("json")
-    print(f"Total Score: {export_data.get('total_score', 0):.2f}")
-    print(f"Successful Tasks: {export_data.get('successful_tasks', 0)}")
+    # Export comprehensive results
+    summary = evaluator.export_results("json")
+    
+    print(f"Total Tasks: {summary['overall']['total_tasks']}")
+    print(f"Success Rate: {summary['overall']['success_rate']:.2%}")
+    print(f"Average Score: {summary['overall']['average_score']:.3f}")
+    
+    # Results are automatically saved to output/ directory
+    # - evaluation_results.json: Detailed results
+    # - evaluation_summary.json: Aggregated statistics
 
-asyncio.run(main())
-
-### Using the Enhanced Hybrid Evaluator
-
-The default `DABEvaluator` now builds on the enhanced hybrid evaluator within `dab_eval.evaluation`. The hybrid workflow:
-- Normalises dates / numbers / addresses before matching expected answers.
-- Multiplies rule-based scores by calibrated confidence and blends them with LLM scores only when the LLM output is well-formed.
-- Drops LLM scores that fall below the configured `llm_evaluation_threshold`.
-- Surfaces multi-dimensional metrics (`accuracy`, `completeness`, `professionalism`, `usefulness`) by merging rule and LLM evidence so you can audit how a score was produced.
-- Falls back to a semantic + relevance scoring scheme (shared with the base evaluator) whenever no expected answer is provided, so concise but accurate replies are not penalised for lacking keywords.
-
-If you need to tweak settings while using `DABEvaluator`, access the underlying evaluator via `evaluator.evaluators["hybrid"]` and adjust its attributes (for example, `llm_evaluation_threshold` or `rule_based_weight`).
-
-To customise the evaluation pipeline, you can instantiate the hybrid evaluator directly:
-
-```python
-from dab_eval.evaluation import HybridEvaluator
-
-hybrid = HybridEvaluator({
-    "use_llm_evaluation": True,
-    "llm_evaluation_threshold": 0.6,
-    "rule_based_weight": 0.4,
-    "llm_based_weight": 0.6,
-    "use_enhanced_scoring": True,
-    "llm_config": llm_config,
-})
-result = await hybrid.evaluate(
-    question="When did the SEC approve the bitcoin spot ETF?",
-    agent_response="The SEC approved it on January 10, 2024.",
-    expected_answer="2024-01-10",
-    context={"category": "web_retrieval"},
-)
-print(result["score"], result["reasoning"])
+asyncio.run(evaluate_dataset())
 ```
 
-You can also reuse the enhanced scoring utilities independently:
+## Configuration
 
-```python
-from dab_eval.evaluation import EnhancedScoringSystem, ScoringMethod
+The SDK supports both JSON and Python configuration files. Here's a complete example:
 
-scoring = EnhancedScoringSystem()
-result = scoring.score_answer(
-    expected="Approval date: 2024-01-10",
-    agent="The SEC approved it on January 10, 2024.",
-    method=ScoringMethod.FORMAT_STRICT,
-)
-print(result.score, result.confidence, result.reasoning)
+**configs/example_config.json:**
+```json
+{
+  "llm_config": {
+    "model": "gpt-4",
+    "base_url": "https://api.openai.com/v1",
+    "api_key": "${OPENAI_API_KEY}",
+    "temperature": 0.3,
+    "max_tokens": 2000
+  },
+  "agent_config": {
+    "url": "http://localhost:8002",
+    "capabilities": ["web_retrieval", "web_onchain_retrieval", "onchain_retrieval"],
+    "timeout": 30,
+    "close_endpoint": "http://localhost:8002/close"
+  },
+  "dataset_config": {
+    "type": "csv",
+    "path": "data/benchmark.csv",
+    "abbr": "benchmark"
+  },
+  "evaluator_config": {
+    "type": "hybrid",
+    "rule_based_weight": 0.3,
+    "llm_based_weight": 0.7,
+    "llm_evaluation_threshold": 0.5
+  },
+  "runner_config": {
+    "type": "local",
+    "max_workers": 4,
+    "timeout": 300
+  },
+  "work_dir": "output"
+}
 ```
-```
 
-## API Documentation
+See `configs/example_config.py` for a Python-based configuration example.
 
-### DABEvaluator Class
+## Evaluation Methods
 
-Main SDK class providing Agent evaluation functionality.
+The SDK automatically selects evaluation methods based on task categories, but you can also specify them explicitly:
 
-#### Constructor
+### Rule-Based Evaluation
+Best for tasks requiring precise matching, such as:
+- Factual Q&A with specific answers
+- Event timeline extraction
+- Technical parameter queries
 
-```python
-DABEvaluator(llm_config: Dict[str, Any], output_path: str = "output")
-```
+### LLM-Based Evaluation
+Ideal for tasks requiring understanding and reasoning:
+- Abstractive summarization
+- Complex technical explanations
+- Disambiguation tasks
 
-- `llm_config`: LLM configuration dictionary
-- `output_path`: Output directory for results
+### Hybrid Evaluation
+Combines both approaches for tasks needing both precision and comprehension:
+- Cross-source verification
+- Multi-step reasoning
+- Tasks with both factual and explanatory components
 
-#### Methods
+## Results and Analytics
 
-##### `evaluate_agent(question, agent_metadata, task_type, context, category, evaluation_method, expected_answer)`
+The SDK provides comprehensive result analysis:
 
-Evaluate single Agent.
+**Overall Statistics:**
+- Total tasks, success/failure rates
+- Average scores and confidence levels
+- Processing time metrics
 
-**Parameters:**
-- `question` (str): Evaluation question
-- `agent_metadata` (AgentMetadata): Agent metadata
-- `task_type` (TaskType): Task type enum
-- `context` (dict): Context information
-- `category` (TaskCategory): Task category enum
-- `evaluation_method` (EvaluationMethod, optional): Evaluation method enum (auto-selected if not provided)
-- `expected_answer` (str, optional): Expected answer
+**Category Breakdown:**
+- Performance by task category
+- Success rates per category
+- Average scores per category
 
-**Returns:**
-- `EvaluationResult`: Evaluation result
+**Score Distribution:**
+- Excellent (≥0.8)
+- Good (0.6-0.8)
+- Fair (0.4-0.6)
+- Poor (<0.4)
 
-##### `get_task_status(task_id)`
+Results are exported in both JSON (detailed) and CSV (tabular) formats for easy analysis and reporting.
 
-Get task status.
+## Architecture
 
-**Parameters:**
-- `task_id` (str): Task ID
+The SDK follows a modular architecture inspired by industry best practices:
 
-**Returns:**
-- `EvaluationTask`: Task status
+- **EvaluationEngine**: Core evaluation logic and method selection
+- **Runner**: Task execution and scheduling (supports local and distributed execution)
+- **Summarizer**: Result aggregation and statistical analysis
+- **Config System**: Centralized configuration management
 
-##### `list_tasks()`
-
-List all tasks.
-
-**Returns:**
-- `List[EvaluationTask]`: All tasks
-
-##### `export_results(format)`
-
-Export evaluation results to output_path.
-
-**Parameters:**
-- `format` (str): Export format ("json" or "csv")
-
-**Returns:**
-- `Union[str, Dict[str, Any]]`: Exported results
-
-#### Enums
-
-##### TaskCategory
-
-- `WEB_RETRIEVAL`: Web retrieval tasks
-- `WEB_ONCHAIN_RETRIEVAL`: Web + On-chain retrieval tasks
-- `ONCHAIN_RETRIEVAL`: On-chain retrieval tasks
-
-##### TaskType
-
-- `SINGLE_DOC_FACT_QA`: Single document fact Q&A
-- `EVENT_TIMELINE`: Event timeline extraction
-- `DISAMBIGUATION`: Disambiguation tasks
-- `ABSTRACTIVE_WITH_EVIDENCE`: Abstractive tasks with evidence
-- `CLAIM_VERIFICATION`: Claim verification
-- `RECONCILIATION`: Reconciliation tasks
-- `CROSS_SOURCE_EXPLANATION`: Cross-source explanation
-- `PARAMETER_PERMISSION_CHANGE`: Parameter/permission change detection
-- `TECHNICAL_KNOWLEDGE`: Technical knowledge tasks
-- `TOP_K_AGGREGATION`: Top-K aggregation tasks
-
-##### EvaluationMethod
-
-- `RULE_BASED`: Rule-based evaluation
-- `LLM_BASED`: LLM-based evaluation
-- `HYBRID`: Hybrid evaluation (rule-based + LLM-based)
-
-### AgentMetadata Class
-
-Agent metadata for evaluation.
-
-**Parameters:**
-- `url` (str): Agent API URL
-- `capabilities` (List[str]): Agent capabilities
-- `timeout` (int): Request timeout (default: 30)
-- `close_endpoint` (str, optional): Agent close endpoint
-- `api_key` (str, optional): API key
-
-### EvaluationResult Class
-
-Evaluation result data.
-
-**Attributes:**
-- `task_id` (str): Task ID
-- `question` (str): Evaluation question
-- `agent_response` (str): Agent response
-- `evaluation_score` (float): Evaluation score (0.0-1.0)
-- `evaluation_reasoning` (str): Evaluation reasoning
-- `confidence` (float): Agent confidence
-- `processing_time` (float): Processing time
-- `tools_used` (List[str]): Tools used
-- `metadata` (dict): Additional metadata
-- `status` (EvaluationStatus): Task status
-- `error` (str, optional): Error message
-
-## Intelligent Evaluation Strategy
-
-The SDK automatically selects the most appropriate evaluation method based on task category and type:
-
-### Web Retrieval Tasks
-- **Single Document Fact Q&A**: Rule-based evaluation
-- **Event Timeline**: Rule-based evaluation
-- **Abstractive with Evidence**: LLM-based evaluation
-- **Disambiguation**: LLM-based evaluation
-
-### Web + On-chain Retrieval Tasks
-- **Claim Verification**: Hybrid evaluation
-- **Reconciliation**: Hybrid evaluation
-- **Cross-source Explanation**: LLM-based evaluation
-
-### On-chain Retrieval Tasks
-- **Event Timeline**: Rule-based evaluation
-- **Parameter/Permission Change**: Rule-based evaluation
-- **Technical Knowledge**: LLM-based evaluation
+This separation of concerns makes the framework easy to extend, test, and customize for your specific needs.
 
 ## Examples
 
-### Basic Evaluation
+Check out the `examples/` directory for complete working examples:
+
+- `basic_usage.py` - Simple single-question evaluation
+- `batch_evaluation.py` - Batch processing with custom logic
+- `config_based_evaluation.py` - Using configuration files
+- `enhanced_batch_evaluation.py` - Advanced batch evaluation with statistics
+
+## API Reference
+
+### DABEvaluator
+
+Main evaluation class.
 
 ```python
-from dab_eval import DABEvaluator, AgentMetadata, TaskCategory
-
-    # LLM configuration
-    llm_config = {
-        "model": "doubao-seed-1-6-251015",
-        "base_url": "https://ark.cn-beijing.volces.com/api/v3",
-        "api_key": os.environ.get("ARK_API_KEY", "your_api_key_here"),
-        "temperature": 0.3,
-        "max_tokens": 2000
-    }
-
-# Create evaluator
-evaluator = DABEvaluator(llm_config, "output")
-
-# Define agent
-agent = AgentMetadata(
-    url="http://localhost:8002",
-    capabilities=["web3_analysis"],
-    timeout=30
-)
-
-# Evaluate agent
-result = await evaluator.evaluate_agent(
-    question="What is the topic0 of ERC-20 Transfer event?",
-    agent_metadata=agent,
-    task_type=TaskType.TECHNICAL_KNOWLEDGE,
-    category=TaskCategory.ONCHAIN_RETRIEVAL
-)
+evaluator = DABEvaluator(config: EvaluationConfig)
 ```
 
-### Batch Evaluation
+**Methods:**
 
-```python
-import pandas as pd
-from dab_eval import DABEvaluator, AgentMetadata, TaskCategory
+- `evaluate_agent(question, agent_metadata, category, evaluation_method, expected_answer, context)` - Evaluate a single agent response
+- `evaluate_agent_with_dataset(agent_metadata, dataset_path, max_tasks)` - Evaluate against a dataset
+- `export_results(format)` - Export results (format: "json" or "csv")
 
-# Load benchmark data
-df = pd.read_csv("data/benchmark.csv")
+### Configuration Classes
 
-# Create evaluator
-evaluator = DABEvaluator(llm_config, "output")
+- `EvaluationConfig` - Complete evaluation configuration
+- `LLMConfig` - LLM model configuration
+- `AgentConfig` - Agent endpoint configuration
+- `DatasetConfig` - Dataset loading configuration
+- `EvaluatorConfig` - Evaluation method configuration
+- `RunnerConfig` - Task execution configuration
 
-# Define agent
-agent = AgentMetadata(
-    url="http://localhost:8002",
-    capabilities=["web3_analysis"],
-    timeout=30
-)
+### Enums
 
-# Batch evaluation
-results = []
-for _, row in df.iterrows():
-    result = await evaluator.evaluate_agent(
-        question=row["question"],
-        agent_metadata=agent,
-        task_type=TaskType(row["task_type"]),
-        category=TaskCategory(row["category"]),
-        expected_answer=row["answer"]
-    )
-    results.append(result)
-
-# Export results
-json_results = evaluator.export_results("json")
-csv_results = evaluator.export_results("csv")
-```
-
-## Output Files
-
-The SDK automatically generates the following files in the specified output directory:
-
-- `evaluation_results.json`: Detailed evaluation results in JSON format
-- `evaluation_results.csv`: Evaluation results in CSV format
+- `TaskCategory`: `WEB_RETRIEVAL`, `WEB_ONCHAIN_RETRIEVAL`, `ONCHAIN_RETRIEVAL`
+- `EvaluationMethod`: `RULE_BASED`, `LLM_BASED`, `HYBRID`
+- `EvaluationStatus`: `PENDING`, `IN_PROGRESS`, `COMPLETED`, `FAILED`
 
 ## Requirements
 
 - Python 3.8+
 - httpx
-- openai
+- openai (or compatible API client)
+- sentence-transformers
+- scikit-learn
+- numpy
 
 ## License
 
 MIT License
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit issues or pull requests.
