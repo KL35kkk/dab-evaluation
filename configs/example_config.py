@@ -1,14 +1,19 @@
 """
 Example Python configuration file for DAB Evaluation SDK
+Demonstrates separated business and infrastructure configurations
 """
 
 import os
 
+# ============================================
+# Business Configuration
+# ============================================
+
 # LLM Configuration
 llm_config = {
-    "model": os.environ.get("LLM_MODEL", "doubao-seed-1-6-251015"),
-    "base_url": os.environ.get("LLM_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3"),
-    "api_key": os.environ.get("ARK_API_KEY", ""),
+    "model": os.environ.get("LLM_MODEL", "gpt-4"),
+    "base_url": os.environ.get("LLM_BASE_URL", "https://api.openai.com/v1"),
+    "api_key": os.environ.get("OPENAI_API_KEY", ""),
     "temperature": 0.3,
     "max_tokens": 2000
 }
@@ -41,6 +46,18 @@ evaluator_config = {
     "use_llm_evaluation": True
 }
 
+# Business Config Bundle
+business_config = {
+    "llm_config": llm_config,
+    "agent_config": agent_config,
+    "dataset_config": dataset_config,
+    "evaluator_config": evaluator_config
+}
+
+# ============================================
+# Infrastructure Configuration
+# ============================================
+
 # Runner Configuration
 runner_config = {
     "type": "local",
@@ -49,14 +66,40 @@ runner_config = {
     "timeout": 300
 }
 
-# Complete Configuration
-config = {
-    "llm_config": llm_config,
-    "agent_config": agent_config,
-    "dataset_config": dataset_config,
-    "evaluator_config": evaluator_config,
-    "runner_config": runner_config,
-    "work_dir": "output",
-    "max_tasks": None  # Set to a number to limit tasks, None for all
+# Storage Configuration
+storage_config = {
+    "enable_persistence": True,
+    "auto_save": True,
+    "save_interval": 10,  # Save after every N tasks
+    "results_dir": "results",  # Relative to work_dir
+    "tasks_dir": "tasks",  # Relative to work_dir
+    "enable_versioning": False,
+    "max_versions": 10
 }
 
+# Infrastructure Config Bundle
+infrastructure_config = {
+    "runner_config": runner_config,
+    "storage_config": storage_config
+}
+
+# ============================================
+# Complete Configuration
+# ============================================
+
+config = {
+    "business_config": business_config,
+    "infrastructure_config": infrastructure_config,
+    "work_dir": "output",
+    "max_tasks": None,  # Set to a number to limit tasks, None for all
+    "reuse_results": None  # "latest" or specific task_id/timestamp to reuse
+}
+
+# Alternative: Legacy flat format (still supported for backward compatibility)
+config_legacy = {
+    **business_config,
+    **infrastructure_config,
+    "work_dir": "output",
+    "max_tasks": None,
+    "reuse_results": None
+}

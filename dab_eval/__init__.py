@@ -14,15 +14,13 @@ __version__ = "1.0.0"
 __author__ = "DAB Team"
 __email__ = "dab@example.com"
 
+# Import enums and dataclasses
+from .enums import TaskCategory, EvaluationMethod, EvaluationStatus
+from .dataclasses import AgentMetadata, EvaluationTask, EvaluationResult
+
 # Import main classes and functions
 from .dab_eval import (
     DABEvaluator,
-    AgentMetadata,
-    EvaluationTask,
-    EvaluationResult,
-    TaskCategory,
-    EvaluationMethod,
-    EvaluationStatus,
     evaluate_agent,
 )
 
@@ -34,6 +32,9 @@ from .config import (
     DatasetConfig,
     EvaluatorConfig,
     RunnerConfig,
+    StorageConfig,
+    BusinessConfig,
+    InfrastructureConfig,
     load_config,
 )
 
@@ -47,6 +48,10 @@ from .evaluation import (
 # Import runners and summarizers
 from .runners import BaseRunner, LocalRunner
 from .summarizers import BaseSummarizer, DefaultSummarizer
+
+# Import storage and task management
+from .storage import ResultStorage
+from .task_manager import TaskManager
 
 __all__ = [
     # Main classes
@@ -62,7 +67,14 @@ __all__ = [
     "DatasetConfig",
     "EvaluatorConfig",
     "RunnerConfig",
+    "StorageConfig",
+    "BusinessConfig",
+    "InfrastructureConfig",
     "load_config",
+    
+    # Storage and Task Management
+    "ResultStorage",
+    "TaskManager",
     
     # Enums
     "TaskCategory",

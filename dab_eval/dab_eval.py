@@ -11,8 +11,11 @@ import os
 import json
 from typing import Dict, Any, List, Optional, Union
 from dataclasses import dataclass
-from enum import Enum
 import logging
+
+# Import enums and dataclasses
+from .enums import TaskCategory, EvaluationMethod, EvaluationStatus
+from .dataclasses import AgentMetadata, EvaluationTask, EvaluationResult
 
 # Import evaluation capabilities
 from .evaluation.base_evaluator import BaseEvaluator
@@ -22,69 +25,22 @@ from .evaluation.hybrid_evaluator import HybridEvaluator
 # Import new modular components
 from .config import (
     EvaluationConfig, LLMConfig, AgentConfig, DatasetConfig,
-    EvaluatorConfig, RunnerConfig, TaskCategory, EvaluationMethod
+    EvaluatorConfig, RunnerConfig, StorageConfig,
+    BusinessConfig, InfrastructureConfig
 )
 from .evaluation_engine import EvaluationEngine
 from .runners.local import LocalRunner
 from .runners.agent_runner import AgentRunner
 from .summarizers.default import DefaultSummarizer
+from .storage import ResultStorage
+from .task_manager import TaskManager
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-class EvaluationStatus(Enum):
-    """Evaluation status enumeration"""
-    PENDING = "pending"
-    IN_PROGRESS = "in_progress"
-    COMPLETED = "completed"
-    FAILED = "failed"
-
-
-@dataclass
-class AgentMetadata:
-    """Agent metadata"""
-    url: str
-    capabilities: List[TaskCategory]
-    timeout: int = 30
-    close_endpoint: Optional[str] = None
-    api_key: Optional[str] = None
-
-
-@dataclass
-class EvaluationTask:
-    """Evaluation task"""
-    task_id: str
-    question: str
-    agent_metadata: AgentMetadata
-    context: Dict[str, Any]
-    category: TaskCategory = TaskCategory.WEB_RETRIEVAL
-    evaluation_method: EvaluationMethod = EvaluationMethod.HYBRID
-    expected_answer: Optional[str] = None
-    status: EvaluationStatus = EvaluationStatus.PENDING
-    agent_response: Optional[Dict[str, Any]] = None
-    evaluation_result: Optional[Dict[str, Any]] = None
-    error: Optional[str] = None
-    created_at: float = 0.0
-    completed_at: Optional[float] = None
-
-
-@dataclass
-class EvaluationResult:
-    """Evaluation result"""
-    task_id: str
-    question: str
-    agent_response: str
-    evaluation_score: float
-    evaluation_reasoning: str
-    confidence: float
-    processing_time: float
-    tools_used: List[str]
-    metadata: Dict[str, Any]
-    status: EvaluationStatus
-    error: Optional[str] = None
-
+# AgentMetadata, EvaluationTask, EvaluationResult are now in .dataclasses
 
 class DABEvaluator:
     """DAB Evaluator with modular architecture.
@@ -121,15 +77,44 @@ class DABEvaluator:
         
         self.summarizer = DefaultSummarizer(config={})
         
-        # Task storage
+        # Initialize storage and task manager
+        # Create default storage config if not provided
+        if config.storage_config is None:
+            config.storage_config = StorageConfig()
+        storage_config_dict = config.storage_config.to_dict()
+        self.storage = ResultStorage(work_dir=config.work_dir, storage_config=storage_config_dict)
+        self.task_manager = TaskManager(storage=self.storage)
+        
+        # Task storage (in-memory)
         self.results: List[Dict[str, Any]] = []
+        
+        # Handle reuse_results if specified
+        if config.reuse_results:
+            self._load_existing_results(config.reuse_results)
+    
+    def _load_existing_results(self, reuse_mode: str):
+        """Load existing results for reuse"""
+        if reuse_mode == "latest":
+            # Load latest results
+            latest_task_id = self.storage.get_latest_results()
+            if latest_task_id:
+                result = self.storage.load_result(latest_task_id)
+                if result:
+                    self.results.append(result)
+                    logger.info(f"Loaded latest result: {latest_task_id}")
+        else:
+            # Load specific timestamp or task ID
+            result = self.storage.load_result(reuse_mode)
+            if result:
+                self.results.append(result)
+                logger.info(f"Loaded result: {reuse_mode}")
     
     async def evaluate_agent(self,
-                            question: str,
-                            agent_metadata: AgentMetadata,
-                            context: Optional[Dict[str, Any]] = None,
-                            category: TaskCategory = TaskCategory.WEB_RETRIEVAL,
-                            evaluation_method: Optional[EvaluationMethod] = None,
+        question: str,
+        agent_metadata: AgentMetadata,
+        context: Optional[Dict[str, Any]] = None,
+        category: TaskCategory = TaskCategory.WEB_RETRIEVAL,
+        evaluation_method: Optional[EvaluationMethod] = None,
                             expected_answer: Optional[str] = None) -> EvaluationResult:
         """
         Evaluate single Agent.
@@ -159,7 +144,7 @@ class DABEvaluator:
         # Convert to EvaluationResult
         task_id = f"task_{int(time.time())}_{len(self.results)}"
         result = EvaluationResult(
-            task_id=task_id,
+                task_id=task_id,
             question=result_dict["question"],
             agent_response=result_dict["agent_response"],
             evaluation_score=result_dict["evaluation_score"],
@@ -172,14 +157,23 @@ class DABEvaluator:
             error=result_dict.get("error")
         )
         
-        # Store result
+        # Store result (in-memory)
         self.results.append(result_dict)
+        
+        # Persist result if enabled
+        storage_config = self.config.infrastructure_config.storage_config
+        if storage_config and storage_config.enable_persistence:
+            self.task_manager.save_result(task_id, result)
+            
+            # Auto-save if enabled
+            if storage_config.auto_save and len(self.results) % storage_config.save_interval == 0:
+                self._auto_save_results()
         
         return result
     
     async def evaluate_agent_with_dataset(self,
-                                         agent_metadata: AgentMetadata,
-                                         dataset_path: str,
+        agent_metadata: AgentMetadata,
+        dataset_path: str,
                                          max_tasks: Optional[int] = None) -> List[EvaluationResult]:
         """
         Evaluate Agent using dataset.
@@ -329,6 +323,54 @@ class DABEvaluator:
         
         else:
             raise ValueError(f"Unsupported format: {format}")
+
+    def _auto_save_results(self):
+        """Auto-save results periodically"""
+        # Results are already saved individually, this is for batch operations
+        pass
+    
+    def get_task_status(self, task_id: str) -> Optional[EvaluationStatus]:
+        """Get task status by task_id"""
+        return self.task_manager.get_task_status(task_id)
+    
+    def list_tasks(self, status: Optional[EvaluationStatus] = None) -> List[EvaluationTask]:
+        """List all tasks, optionally filtered by status"""
+        return self.task_manager.list_tasks(status)
+    
+    def resume_tasks(self, task_ids: Optional[List[str]] = None) -> List[str]:
+        """
+        Resume incomplete tasks.
+        
+        Args:
+            task_ids: List of task IDs to resume (None = all incomplete)
+            
+        Returns:
+            List of task IDs that need to be resumed
+        """
+        return self.task_manager.resume_tasks(task_ids)
+    
+    def load_existing_results(self, reuse_mode: str = "latest") -> List[Dict[str, Any]]:
+        """
+        Load existing results for reuse.
+        
+        Args:
+            reuse_mode: "latest" or specific task_id/timestamp
+            
+        Returns:
+            List of result dictionaries
+        """
+        if reuse_mode == "latest":
+            latest_task_id = self.storage.get_latest_results()
+            if latest_task_id:
+                result = self.storage.load_result(latest_task_id)
+                if result:
+                    return [result]
+        else:
+            result = self.storage.load_result(reuse_mode)
+            if result:
+                return [result]
+        
+        return []
 
 
 # Convenience function for backward compatibility (deprecated)

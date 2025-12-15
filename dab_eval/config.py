@@ -128,6 +128,27 @@ class RunnerConfig:
 
 
 @dataclass
+class StorageConfig:
+    """Storage and persistence configuration"""
+    enable_persistence: bool = True
+    auto_save: bool = True
+    save_interval: int = 10  # Save after every N tasks
+    results_dir: str = "results"  # Relative to work_dir
+    tasks_dir: str = "tasks"  # Relative to work_dir
+    enable_versioning: bool = False
+    max_versions: int = 10  # Maximum number of result versions to keep
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'StorageConfig':
+        """Create from dictionary"""
+        return cls(**data)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary"""
+        return asdict(self)
+
+
+@dataclass
 class EvaluationConfig:
     """Complete evaluation configuration"""
     llm_config: LLMConfig
@@ -135,8 +156,10 @@ class EvaluationConfig:
     dataset_config: DatasetConfig
     evaluator_config: Optional[EvaluatorConfig] = None
     runner_config: Optional[RunnerConfig] = None
+    storage_config: Optional[StorageConfig] = None
     work_dir: str = "output"
     max_tasks: Optional[int] = None
+    reuse_results: Optional[str] = None  # "latest" or specific timestamp
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'EvaluationConfig':
@@ -150,6 +173,9 @@ class EvaluationConfig:
         runner_config = None
         if 'runner_config' in data:
             runner_config = RunnerConfig.from_dict(data['runner_config'])
+        storage_config = None
+        if 'storage_config' in data:
+            storage_config = StorageConfig.from_dict(data['storage_config'])
         
         return cls(
             llm_config=llm_config,
@@ -157,8 +183,10 @@ class EvaluationConfig:
             dataset_config=dataset_config,
             evaluator_config=evaluator_config,
             runner_config=runner_config,
+            storage_config=storage_config,
             work_dir=data.get('work_dir', 'output'),
-            max_tasks=data.get('max_tasks')
+            max_tasks=data.get('max_tasks'),
+            reuse_results=data.get('reuse_results')
         )
     
     def to_dict(self) -> Dict[str, Any]:
@@ -173,8 +201,12 @@ class EvaluationConfig:
             result['evaluator_config'] = self.evaluator_config.to_dict()
         if self.runner_config:
             result['runner_config'] = self.runner_config.to_dict()
+        if self.storage_config:
+            result['storage_config'] = self.storage_config.to_dict()
         if self.max_tasks:
             result['max_tasks'] = self.max_tasks
+        if self.reuse_results:
+            result['reuse_results'] = self.reuse_results
         return result
     
     @classmethod
@@ -225,6 +257,9 @@ def load_config(filepath: Optional[str] = None, **kwargs) -> EvaluationConfig:
         runner_config = None
         if 'runner_config' in kwargs:
             runner_config = RunnerConfig.from_dict(kwargs['runner_config'])
+        storage_config = None
+        if 'storage_config' in kwargs:
+            storage_config = StorageConfig.from_dict(kwargs['storage_config'])
         
         return EvaluationConfig(
             llm_config=llm_config,
@@ -232,7 +267,9 @@ def load_config(filepath: Optional[str] = None, **kwargs) -> EvaluationConfig:
             dataset_config=dataset_config,
             evaluator_config=evaluator_config,
             runner_config=runner_config,
+            storage_config=storage_config,
             work_dir=kwargs.get('work_dir', 'output'),
-            max_tasks=kwargs.get('max_tasks')
+            max_tasks=kwargs.get('max_tasks'),
+            reuse_results=kwargs.get('reuse_results')
         )
 

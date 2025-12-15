@@ -10,7 +10,7 @@ import logging
 from .evaluation.base_evaluator import BaseEvaluator
 from .evaluation.llm_evaluator import LLMEvaluator
 from .evaluation.hybrid_evaluator import HybridEvaluator
-from .dab_eval import EvaluationMethod, TaskCategory, EvaluationStatus
+from .enums import EvaluationMethod, TaskCategory, EvaluationStatus
 from .runners.agent_runner import AgentRunner
 
 logger = logging.getLogger(__name__)
