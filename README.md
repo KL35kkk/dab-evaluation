@@ -22,12 +22,6 @@ The framework intelligently combines rule-based precision with LLM-based underst
 
 ## Quick Start
 
-### Installation
-
-```bash
-pip install httpx openai sentence-transformers scikit-learn numpy
-```
-
 ### Basic Usage
 
 The SDK uses a configuration-driven approach. Start by creating a configuration:
