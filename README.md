@@ -1,6 +1,6 @@
 # DAB Evaluation SDK
 
-A comprehensive Python framework for evaluating Web3 agents, designed to assess agent capabilities and performance across various task categories with intelligent evaluation strategies.
+A lightweight Python framework for evaluating Web3 agents, designed to assess agent capabilities and performance across various task categories with intelligent evaluation strategies.
 
 ## Overview
 
