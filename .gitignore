@@ -118,6 +118,18 @@ test_output/
 evaluation_results.json
 evaluation_results.csv
 
+# Packaging & release (local only)
+MANIFEST.in
+PUBLISH.md
+RELEASE.md
+publish.sh
+dist/
+*.whl
+*.tar.gz
+
+# Local samples
+sample/
+
 # Model files
 *.model
 *.pkl

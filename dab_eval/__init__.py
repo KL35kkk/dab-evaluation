@@ -26,12 +26,27 @@ from .dab_eval import (
     evaluate_agent,
 )
 
+# Import configuration system
+from .config import (
+    EvaluationConfig,
+    LLMConfig,
+    AgentConfig,
+    DatasetConfig,
+    EvaluatorConfig,
+    RunnerConfig,
+    load_config,
+)
+
 # Import evaluation modules
 from .evaluation import (
     BaseEvaluator,
     LLMEvaluator,
     HybridEvaluator,
 )
+
+# Import runners and summarizers
+from .runners import BaseRunner, LocalRunner
+from .summarizers import BaseSummarizer, DefaultSummarizer
 
 __all__ = [
     # Main classes
@@ -40,18 +55,35 @@ __all__ = [
     "EvaluationTask",
     "EvaluationResult",
     
+    # Configuration
+    "EvaluationConfig",
+    "LLMConfig",
+    "AgentConfig",
+    "DatasetConfig",
+    "EvaluatorConfig",
+    "RunnerConfig",
+    "load_config",
+    
     # Enums
     "TaskCategory",
     "EvaluationMethod", 
     "EvaluationStatus",
     
-    # Convenience functions
+    # Convenience functions (deprecated)
     "evaluate_agent",
     
     # Evaluation modules
     "BaseEvaluator",
     "LLMEvaluator", 
     "HybridEvaluator",
+    
+    # Runners
+    "BaseRunner",
+    "LocalRunner",
+    
+    # Summarizers
+    "BaseSummarizer",
+    "DefaultSummarizer",
     
     # Package info
     "__version__",

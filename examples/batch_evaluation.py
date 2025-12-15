@@ -12,21 +12,44 @@ from typing import List, Dict, Any
 
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from dab_eval import DABEvaluator, AgentMetadata, EvaluationResult, TaskCategory
+from dab_eval import (
+    DABEvaluator, 
+    AgentMetadata, 
+    EvaluationResult, 
+    TaskCategory,
+    EvaluationConfig,
+    LLMConfig,
+    AgentConfig,
+    DatasetConfig,
+    RunnerConfig
+)
 
 class BatchEvaluator:
     """Batch evaluator"""
     
     def __init__(self):
-        # LLM configuration
-        llm_config = {
-            "model": "doubao-seed-1-6-251015",
-            "base_url": "https://ark.cn-beijing.volces.com/api/v3",
-            "api_key": os.environ.get("ARK_API_KEY", ""),
-            "temperature": 0.3,
-            "max_tokens": 2000
-        }
-        self.evaluator = DABEvaluator(llm_config, "output")
+        # Create configuration
+        config = EvaluationConfig(
+            llm_config=LLMConfig(
+                model="doubao-seed-1-6-251015",
+                base_url="https://ark.cn-beijing.volces.com/api/v3",
+                api_key=os.environ.get("ARK_API_KEY", ""),
+                temperature=0.3,
+                max_tokens=2000
+            ),
+            agent_config=AgentConfig(
+                url="http://localhost:8002",
+                capabilities=[TaskCategory.ONCHAIN_RETRIEVAL],
+                timeout=30
+            ),
+            dataset_config=DatasetConfig(),
+            runner_config=RunnerConfig(
+                type="local",
+                max_workers=4
+            ),
+            work_dir="output"
+        )
+        self.evaluator = DABEvaluator(config)
         self.results: List[EvaluationResult] = []
     
     async def load_benchmark_data(self, csv_file: str) -> List[Dict[str, Any]]:

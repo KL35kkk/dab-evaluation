@@ -14,12 +14,41 @@ from collections import defaultdict
 
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from dab_eval import DABEvaluator, AgentMetadata, EvaluationResult
+from dab_eval import (
+    DABEvaluator, 
+    AgentMetadata, 
+    EvaluationResult,
+    EvaluationConfig,
+    LLMConfig,
+    AgentConfig,
+    DatasetConfig,
+    EvaluatorConfig,
+    RunnerConfig,
+    TaskCategory
+)
 
 class EnhancedBatchEvaluator:
     """Enhanced batch evaluator"""
     
-    def __init__(self, config: Dict[str, Any] = None):
+    def __init__(self, config: EvaluationConfig = None):
+        if config is None:
+            # Create default config
+            config = EvaluationConfig(
+                llm_config=LLMConfig(
+                    model="doubao-seed-1-6",
+                    base_url="https://ark.cn-beijing.volces.com/api/v3",
+                    api_key=os.environ.get("ARK_API_KEY", ""),
+                    temperature=0.3,
+                    max_tokens=2000
+                ),
+                agent_config=AgentConfig(
+                    url="http://localhost:8002",
+                    capabilities=[TaskCategory.WEB_RETRIEVAL],
+                    timeout=30
+                ),
+                dataset_config=DatasetConfig(),
+                work_dir="output"
+            )
         self.evaluator = DABEvaluator(config)
         self.results: List[EvaluationResult] = []
         self.category_stats = defaultdict(lambda: {"total": 0, "successful": 0, "failed": 0, "scores": []})
@@ -250,19 +279,33 @@ class EnhancedBatchEvaluator:
 async def main():
     """Main function"""
     # Create enhanced batch evaluator
-    config = {
-        "llm_config": {
-            "model": "doubao-seed-1-6",
-            "temperature": 0.3,
-            "max_tokens": 2000
-        },
-        "hybrid_config": {
-            "use_llm_evaluation": True,
-            "llm_evaluation_threshold": 0.5,
-            "rule_based_weight": 0.3,
-            "llm_based_weight": 0.7
-        }
-    }
+    config = EvaluationConfig(
+        llm_config=LLMConfig(
+            model="doubao-seed-1-6",
+            base_url="https://ark.cn-beijing.volces.com/api/v3",
+            api_key=os.environ.get("ARK_API_KEY", ""),
+            temperature=0.3,
+            max_tokens=2000
+        ),
+        agent_config=AgentConfig(
+            url="http://localhost:8002",
+            capabilities=[TaskCategory.WEB_RETRIEVAL, TaskCategory.ONCHAIN_RETRIEVAL],
+            timeout=30
+        ),
+        dataset_config=DatasetConfig(),
+        evaluator_config=EvaluatorConfig(
+            type="hybrid",
+            use_llm_evaluation=True,
+            llm_evaluation_threshold=0.5,
+            rule_based_weight=0.3,
+            llm_based_weight=0.7
+        ),
+        runner_config=RunnerConfig(
+            type="local",
+            max_workers=4
+        ),
+        work_dir="output"
+    )
     
     evaluator = EnhancedBatchEvaluator(config)
     
