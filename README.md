@@ -135,6 +135,46 @@ async def evaluate_dataset():
 asyncio.run(evaluate_dataset())
 ```
 
+### Mock Accuracy Run (Offline Sample)
+
+If you just want to see the full pipeline (evaluation + accuracy analysis) without a real agent, use the bundled mock script. It drives a `mock://` agent against a tiny CSV dataset and produces both `evaluation_results.json` and `accuracy_analysis.json`.
+
+```bash
+python examples/mock_accuracy_run.py
+```
+
+Sample output:
+
+```
+=== Overall Summary ===
+{
+  "total_tasks": 3,
+  "successful_tasks": 3,
+  "failed_tasks": 0,
+  "success_rate": 1.0,
+  "average_score": 0.6111,
+  "average_confidence": 0.85
+}
+
+=== Accuracy Analysis ===
+{
+  "total_evaluations": 3,
+  "bias_detection": {
+    "length_bias": 1.0,
+    "score_clustering": 0.67
+  },
+  "error_analysis": {
+    "precision": 1.0,
+    "recall": 0.67,
+    "f1_score": 0.8
+  },
+  "overall_accuracy_score": 0.6
+}
+
+Detailed JSON saved at: examples/sample_output/evaluation_results.json
+Accuracy analysis saved at: examples/sample_output/accuracy_analysis.json
+```
+
 ## Configuration
 
 The SDK uses a **separated configuration architecture** that distinguishes between business and infrastructure configurations:

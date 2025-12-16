@@ -8,6 +8,7 @@ from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass
 from collections import defaultdict
 import logging
+import math
 
 logger = logging.getLogger(__name__)
 
@@ -321,11 +322,12 @@ class EvaluationAccuracyAnalyzer:
         sum_y2 = sum(yi * yi for yi in y)
         
         numerator = n * sum_xy - sum_x * sum_y
-        denominator = ((n * sum_x2 - sum_x * sum_x) * (n * sum_y2 - sum_y * sum_y)) ** 0.5
-        
+        denominator_term = (n * sum_x2 - sum_x * sum_x) * (n * sum_y2 - sum_y * sum_y)
+        if denominator_term <= 0:
+            return 0.0
+        denominator = math.sqrt(denominator_term)
         if denominator == 0:
             return 0.0
         
         return numerator / denominator
-
 

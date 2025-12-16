@@ -1,0 +1,4 @@
+id,question,answer,category,task_type,evaluation_method,mock_response
+1,"美国 SEC 批准比特币现货 ETF 的日期（UTC）？","2024/1/10","web_retrieval","single_doc_fact_qa","rule_based","2024/1/10"
+2,"以太坊 Shapella 主网升级日期（UTC）？","2023/4/12","web_retrieval","single_doc_fact_qa","rule_based","2023/4/12"
+3,"谁在 2017 年公开称比特币是骗局（fraud）？","Jamie Dimon","web_retrieval","single_doc_fact_qa","hybrid","Jamie Dimon"

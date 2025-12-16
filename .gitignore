@@ -142,6 +142,8 @@ sample/
 *.xls
 data/
 datasets/
+!examples/sample_dataset.csv
+!examples/sample_ground_truth.json
 
 # API keys and secrets
 .env
