@@ -1,10 +1,21 @@
 # DAB Evaluation SDK
 
-A lightweight Python framework for evaluating Web3 agents, designed to assess agent capabilities and performance across various task categories with intelligent evaluation strategies.
+
+**DAB (Decentralized Agent Benchmark)** is a comprehensive evaluation framework designed specifically for **Web3 agents**. As the decentralized ecosystem continues to evolve, autonomous agents are playing an increasingly critical role in interacting with blockchain networks, DeFi protocols, NFT marketplaces, and other Web3 infrastructure.
+
+DAB provides standardized benchmarks and evaluation tools to assess the capabilities of Web3 agents across key scenarios:
+
+- **Web Retrieval**: Agents that fetch and process information from traditional web sources to answer questions about Web3 events, protocols, and market data
+- **On-chain Retrieval**: Agents that query blockchain data directly, extracting transaction histories, smart contract states, token balances, and on-chain analytics
+- **Web + On-chain Retrieval**: Hybrid agents that combine web and blockchain data sources to provide comprehensive answers requiring both off-chain context and on-chain verification
+
+These evaluation scenarios reflect real-world use cases where Web3 agents must navigate complex information landscapes, verify data across multiple sources, and provide accurate, actionable insights for users interacting with decentralized systems.
 
 ## Overview
 
-DAB Evaluation SDK provides a flexible, configuration-driven approach to agent evaluation. Whether you're testing a single agent on a specific question or running comprehensive benchmarks across entire datasets, the SDK adapts to your needs with automatic method selection, multi-dimensional scoring, and detailed analytics.
+DAB Evaluation SDK is a lightweight Python framework for evaluating Web3 agents, designed to assess agent capabilities and performance across various task categories with intelligent evaluation strategies.
+
+The SDK provides a flexible, configuration-driven approach to agent evaluation. Whether you're testing a single agent on a specific question or running comprehensive benchmarks across entire datasets, the SDK adapts to your needs with automatic method selection, multi-dimensional scoring, and detailed analytics.
 
 The framework intelligently combines rule-based precision with LLM-based understanding, ensuring fair and accurate assessments even when reference answers aren't available. Built with modularity in mind, it separates evaluation logic, task execution, and result summarization for maximum flexibility and extensibility.
 

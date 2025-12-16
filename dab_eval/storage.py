@@ -39,6 +39,8 @@ class ResultStorage:
         
         os.makedirs(self.results_dir, exist_ok=True)
         os.makedirs(self.tasks_dir, exist_ok=True)
+        history_filename = self.config.get('history_filename', 'evaluation_history.jsonl')
+        self.history_file = os.path.join(self.results_dir, history_filename)
         
         self.enable_versioning = self.config.get('enable_versioning', False)
         self.max_versions = self.config.get('max_versions', 10)
@@ -194,4 +196,15 @@ class ResultStorage:
         # Implementation for version cleanup
         # This would track versions and remove old ones
         pass
-
+    
+    def append_history_entry(self, entry: Dict[str, Any]):
+        """Append a single evaluation snapshot to the history log."""
+        if not self.config.get('enable_persistence', True):
+            return
+        try:
+            os.makedirs(os.path.dirname(self.history_file), exist_ok=True)
+            with open(self.history_file, 'a', encoding='utf-8') as f:
+                json.dump(entry, f, ensure_ascii=False)
+                f.write('\n')
+        except Exception as exc:
+            logger.warning(f"Failed to append history entry: {exc}")

@@ -29,6 +29,7 @@ from .config import (
     BusinessConfig, InfrastructureConfig
 )
 from .evaluation_engine import EvaluationEngine
+from .evaluation.accuracy_analysis import EvaluationAccuracyAnalyzer
 from .runners.local import LocalRunner
 from .runners.agent_runner import AgentRunner
 from .summarizers.default import DefaultSummarizer
@@ -66,27 +67,28 @@ class DABEvaluator:
         self.output_path = config.work_dir
         
         # Initialize components
+        self.agent_runner = AgentRunner(config={'timeout': 30})
         self.evaluation_engine = EvaluationEngine(
             llm_config=config.llm_config.to_dict(),
-            evaluator_config=config.evaluator_config.to_dict() if config.evaluator_config else None
+            evaluator_config=config.evaluator_config.to_dict() if config.evaluator_config else None,
+            agent_runner=self.agent_runner
         )
         
         runner_config = config.runner_config.to_dict() if config.runner_config else {}
         self.runner = LocalRunner(config=runner_config)
-        self.agent_runner = AgentRunner(config={'timeout': 30})
-        
         self.summarizer = DefaultSummarizer(config={})
         
         # Initialize storage and task manager
         # Create default storage config if not provided
         if config.storage_config is None:
-            config.storage_config = StorageConfig()
+            config.infrastructure_config.storage_config = StorageConfig()
         storage_config_dict = config.storage_config.to_dict()
         self.storage = ResultStorage(work_dir=config.work_dir, storage_config=storage_config_dict)
         self.task_manager = TaskManager(storage=self.storage)
         
         # Task storage (in-memory)
         self.results: List[Dict[str, Any]] = []
+        self._ground_truth: Dict[str, float] = self._load_ground_truth(config.dataset_config)
         
         # Handle reuse_results if specified
         if config.reuse_results:
@@ -130,6 +132,13 @@ class DABEvaluator:
         Returns:
             EvaluationResult instance
         """
+        context = dict(context or {})
+        if agent_metadata.url.startswith("mock://") and expected_answer:
+            context.setdefault("_expected_answer", expected_answer)
+        if "question_id" not in context and context.get("dataset_id"):
+            context["question_id"] = context["dataset_id"]
+        ground_truth_from_context = context.get("ground_truth_score")
+        
         result_dict = await self.evaluation_engine.evaluate_task(
             question=question,
             agent_url=agent_metadata.url,
@@ -156,9 +165,22 @@ class DABEvaluator:
             status=EvaluationStatus(result_dict["status"]),
             error=result_dict.get("error")
         )
+        result_dict["task_id"] = task_id
+        
+        # Augment result metadata for analytics & persistence
+        ground_truth_score = ground_truth_from_context
+        if ground_truth_score is None:
+            lookup_key = result_dict.get("question_id") or question
+            ground_truth_score = self._ground_truth.get(lookup_key)
+        if ground_truth_score is not None:
+            result_dict["ground_truth_score"] = ground_truth_score
+        result_dict["expected_answer"] = expected_answer
+        result_dict["question_id"] = result_dict.get("question_id") or context.get("question_id") or question
+        result_dict["dataset_id"] = context.get("dataset_id")
         
         # Store result (in-memory)
         self.results.append(result_dict)
+        self._record_history_entry(result_dict)
         
         # Persist result if enabled
         storage_config = self.config.infrastructure_config.storage_config
@@ -204,12 +226,38 @@ class DABEvaluator:
                         "hybrid": EvaluationMethod.HYBRID
                     }
                     
+                    question_id = row.get(self.config.dataset_config.question_id_field, row.get("id", str(len(tasks) + 1)))
+                    ground_truth_val = row.get("ground_truth_score")
+                    ground_truth_score = None
+                    if ground_truth_val not in (None, ""):
+                        try:
+                            ground_truth_score = float(ground_truth_val)
+                            self._ground_truth[str(question_id)] = ground_truth_score
+                        except ValueError:
+                            ground_truth_score = None
+                    mock_response = None
+                    mock_field = self.config.dataset_config.mock_response_field
+                    if mock_field:
+                        mock_response = row.get(mock_field)
+                    if not mock_response:
+                        mock_response = row.get("mock_response")
+                    if not mock_response:
+                        mock_response = row.get("answer", "")
+                    
                     task_data = {
                         "question": row["question"],
                         "expected_answer": row.get("answer", ""),
                         "category": category_map.get(row.get("category", "web_retrieval"), TaskCategory.WEB_RETRIEVAL),
                         "evaluation_method": method_map.get(row.get("evaluation_method", "hybrid"), EvaluationMethod.HYBRID),
-                        "context": {"dataset_id": row.get("id", "")}
+                        "question_id": question_id,
+                        "context": {
+                            "dataset_id": question_id,
+                            "question_id": question_id,
+                            "category": row.get("category", "web_retrieval"),
+                            "task_type": row.get("task_type"),
+                            "ground_truth_score": ground_truth_score,
+                            "mock_response": mock_response,
+                        }
                     }
                     tasks.append(task_data)
         except Exception as e:
@@ -272,6 +320,9 @@ class DABEvaluator:
         """
         # Convert results to summary format
         summary = self.summarizer.summarize(self.results)
+        accuracy_analysis = self._run_accuracy_analysis()
+        if accuracy_analysis:
+            summary["accuracy_analysis"] = accuracy_analysis
         
         if format == "json":
             # Save summary
@@ -279,14 +330,17 @@ class DABEvaluator:
             
             # Also save detailed results
             details_path = os.path.join(self.output_path, "evaluation_results.json")
-            with open(details_path, 'w', encoding='utf-8') as f:
-                json.dump({
+            details_payload = {
                     "total_score": summary["overall"]["average_score"],
                     "total_tasks": summary["overall"]["total_tasks"],
                     "successful_tasks": summary["overall"]["successful_tasks"],
                     "failed_tasks": summary["overall"]["failed_tasks"],
                     "results": self.results
-                }, f, indent=2, ensure_ascii=False)
+                }
+            if accuracy_analysis:
+                details_payload["accuracy_analysis"] = accuracy_analysis
+            with open(details_path, 'w', encoding='utf-8') as f:
+                json.dump(details_payload, f, indent=2, ensure_ascii=False)
             
             return summary
         
@@ -328,6 +382,131 @@ class DABEvaluator:
         """Auto-save results periodically"""
         # Results are already saved individually, this is for batch operations
         pass
+    
+    def _run_accuracy_analysis(self) -> Optional[Dict[str, Any]]:
+        """Run accuracy analysis automatically after evaluations complete."""
+        if not self.results:
+            return None
+        analyzer = EvaluationAccuracyAnalyzer()
+        ground_truth = self._build_ground_truth_lookup()
+        analysis = analyzer.comprehensive_analysis(
+            self.results,
+            ground_truth if ground_truth else None
+        )
+        try:
+            os.makedirs(self.output_path, exist_ok=True)
+            analysis_path = os.path.join(self.output_path, "accuracy_analysis.json")
+            with open(analysis_path, "w", encoding="utf-8") as f:
+                json.dump(analysis, f, indent=2, ensure_ascii=False)
+        except Exception as exc:
+            logger.warning(f"Failed to persist accuracy analysis: {exc}")
+        return analysis
+    
+    def _record_history_entry(self, result: Dict[str, Any]):
+        """Append evaluation metadata to persistent history for accuracy analysis."""
+        if not hasattr(self, "storage") or not self.storage:
+            return
+        history_entry = {
+            "task_id": result.get("task_id"),
+            "question_id": result.get("question_id") or result.get("question"),
+            "question": result.get("question"),
+            "score": result.get("evaluation_score"),
+            "confidence": result.get("confidence"),
+            "status": result.get("status"),
+            "category": result.get("category"),
+            "evaluation_method": result.get("evaluation_method"),
+            "evaluated_at": result.get("evaluated_at"),
+            "ground_truth_score": result.get("ground_truth_score"),
+        }
+        self.storage.append_history_entry(history_entry)
+    
+    def _load_ground_truth(self, dataset_config: DatasetConfig) -> Dict[str, float]:
+        """Load ground truth metadata from dataset or external file."""
+        ground_truth: Dict[str, float] = {}
+        if not dataset_config:
+            return ground_truth
+        
+        dataset_path = dataset_config.path
+        if dataset_path and os.path.exists(dataset_path):
+            try:
+                with open(dataset_path, 'r', encoding='utf-8') as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        question_id = row.get(dataset_config.question_id_field) or row.get("id") or row.get("question")
+                        question_text = row.get("question")
+                        if not question_id:
+                            continue
+                        score_val = row.get("ground_truth_score")
+                        if score_val is None:
+                            continue
+                        try:
+                            numeric_score = float(score_val)
+                            ground_truth[str(question_id)] = numeric_score
+                            if question_text:
+                                ground_truth[str(question_text)] = numeric_score
+                        except ValueError:
+                            continue
+            except Exception as exc:
+                logger.debug(f"Skip loading inline ground truth: {exc}")
+        
+        if dataset_config.ground_truth_path:
+            resolved_path = self._resolve_ground_truth_path(dataset_config.ground_truth_path, dataset_path)
+            if resolved_path and os.path.exists(resolved_path):
+                try:
+                    with open(resolved_path, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                    if isinstance(data, dict):
+                        for key, value in data.items():
+                            try:
+                                ground_truth[str(key)] = float(value)
+                            except (TypeError, ValueError):
+                                continue
+                    elif isinstance(data, list):
+                        for item in data:
+                            if not isinstance(item, dict):
+                                continue
+                            qid = item.get("question_id") or item.get("id") or item.get("question")
+                            value = item.get("ground_truth_score") or item.get("score")
+                            question_text = item.get("question")
+                            if qid is None or value is None:
+                                continue
+                            try:
+                                numeric_score = float(value)
+                                ground_truth[str(qid)] = numeric_score
+                                if question_text:
+                                    ground_truth[str(question_text)] = numeric_score
+                            except (TypeError, ValueError):
+                                continue
+                except Exception as exc:
+                    logger.warning(f"Failed to load ground truth file {resolved_path}: {exc}")
+        return ground_truth
+    
+    def _resolve_ground_truth_path(self, path: str, dataset_path: Optional[str]) -> Optional[str]:
+        """Resolve ground truth path relative to dataset if needed."""
+        if os.path.isabs(path):
+            return path
+        candidates = []
+        if dataset_path:
+            dataset_dir = os.path.dirname(os.path.abspath(dataset_path))
+            candidates.append(os.path.join(dataset_dir, path))
+        candidates.append(os.path.abspath(path))
+        for candidate in candidates:
+            if os.path.exists(candidate):
+                return candidate
+        return candidates[-1]
+    
+    def _build_ground_truth_lookup(self) -> Dict[str, float]:
+        """Combine preloaded ground truth with result-level overrides."""
+        lookup = dict(self._ground_truth)
+        for result in self.results:
+            qid = result.get("question_id") or result.get("question")
+            value = result.get("ground_truth_score")
+            if qid and value is not None:
+                lookup[str(qid)] = float(value)
+                question_text = result.get("question")
+                if question_text:
+                    lookup[str(question_text)] = float(value)
+        return lookup
     
     def get_task_status(self, task_id: str) -> Optional[EvaluationStatus]:
         """Get task status by task_id"""

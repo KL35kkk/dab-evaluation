@@ -39,6 +39,11 @@ class EnhancedScoringSystem:
             ScoringMethod.HYBRID_BALANCED: self._hybrid_balanced_scoring,
             ScoringMethod.CONTENT_FOCUSED: self._content_focused_scoring,
         }
+        self._category_calibration = {
+            "web_retrieval": 0.01,
+            "web_onchain_retrieval": 0.0,
+            "onchain_retrieval": -0.01,
+        }
 
     def score_answer(
         self,
@@ -114,6 +119,7 @@ class EnhancedScoringSystem:
             score = normalized_score
             reasoning = f"Normalized format match: {normalized_score:.3f}"
 
+        score = self._apply_bias_mitigation(score, expected, agent, context)
         confidence = self._compute_confidence(breakdown)
         return ScoringResult(
             score=score,
@@ -146,6 +152,7 @@ class EnhancedScoringSystem:
             + factual_score * weights["factual"]
             + relevance_score * weights["relevance"]
         )
+        total_score = self._apply_bias_mitigation(total_score, expected, agent, context)
 
         return ScoringResult(
             score=total_score,
@@ -190,6 +197,7 @@ class EnhancedScoringSystem:
             + content_score * weights["content"]
             + factual_score * weights["factual"]
         )
+        total_score = self._apply_bias_mitigation(total_score, expected, agent, context)
 
         return ScoringResult(
             score=total_score,
@@ -238,6 +246,7 @@ class EnhancedScoringSystem:
             + completeness_score * weights["completeness"]
             + professionalism_score * weights["professionalism"]
         )
+        total_score = self._apply_bias_mitigation(total_score, expected, agent, context)
 
         return ScoringResult(
             score=total_score,
@@ -317,6 +326,7 @@ class EnhancedScoringSystem:
             + professionalism_score * weights["professionalism"]
             + evidence_score * weights["evidence"]
         )
+        total_score = self._apply_bias_mitigation(total_score, analysis_target, agent, context)
 
         breakdown = {
             "semantic": semantic_score,
@@ -341,6 +351,53 @@ class EnhancedScoringSystem:
             reasoning=reasoning,
             suggestions=self._generate_question_suggestions(breakdown),
         )
+
+    # --- Bias mitigation utilities -------------------------------------------------
+
+    def _apply_bias_mitigation(
+        self,
+        score: float,
+        expected_or_reference: Optional[str],
+        agent: str,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> float:
+        """Apply score adjustments to reduce systemic bias."""
+        adjusted = score
+        adjusted *= self._length_normalization_factor(expected_or_reference, agent)
+        adjusted += self._category_calibration_boost(context)
+        adjusted = self._score_resampling(adjusted)
+        return max(0.0, min(1.0, adjusted))
+
+    def _length_normalization_factor(self, expected: Optional[str], agent: str) -> float:
+        """Reduce advantage for extremely long or short responses."""
+        if not expected or not agent:
+            return 1.0
+        expected_len = max(len(expected.strip()), 1)
+        agent_len = max(len(agent.strip()), 1)
+        diff_ratio = abs(agent_len - expected_len) / expected_len
+        penalty = min(0.2, diff_ratio * 0.3)
+        return max(0.8, 1.0 - penalty)
+
+    def _category_calibration_boost(self, context: Optional[Dict[str, Any]]) -> float:
+        """Apply small deterministic offsets to balance category-level drift."""
+        if not context:
+            return 0.0
+        category = context.get("category")
+        if not category:
+            return 0.0
+        return self._category_calibration.get(str(category), 0.0)
+
+    def _score_resampling(self, score: float) -> float:
+        """Spread scores slightly to avoid clustering around mid values."""
+        deviation = score - 0.5
+        spread_factor = 1.1
+        resampled = 0.5 + deviation * spread_factor
+        # gentle clamp
+        if resampled > score:
+            resampled = min(resampled, score + 0.05)
+        elif resampled < score:
+            resampled = max(resampled, score - 0.05)
+        return min(1.0, max(0.0, resampled))
 
     # --- Normalization utilities -------------------------------------------------
 

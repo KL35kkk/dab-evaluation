@@ -64,6 +64,9 @@ class DatasetConfig:
     path: str = ""
     abbr: str = ""
     reader_cfg: Optional[Dict[str, Any]] = None
+    ground_truth_path: Optional[str] = None
+    question_id_field: str = "id"
+    mock_response_field: Optional[str] = None
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'DatasetConfig':
@@ -129,4 +132,3 @@ class BusinessConfig:
         if self.evaluator_config:
             result['evaluator_config'] = self.evaluator_config.to_dict()
         return result
-

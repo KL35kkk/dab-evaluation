@@ -25,7 +25,8 @@ class EvaluationEngine:
     - Processing evaluation results
     """
     
-    def __init__(self, llm_config: Dict[str, Any], evaluator_config: Optional[Dict[str, Any]] = None):
+    def __init__(self, llm_config: Dict[str, Any], evaluator_config: Optional[Dict[str, Any]] = None,
+                 agent_runner: Optional[AgentRunner] = None):
         """
         Initialize evaluation engine.
         
@@ -36,7 +37,7 @@ class EvaluationEngine:
         self.llm_config = llm_config
         self.evaluator_config = evaluator_config or {}
         self.evaluators: Dict[str, BaseEvaluator] = {}
-        self.agent_runner = AgentRunner(config={'timeout': 30})
+        self.agent_runner = agent_runner or AgentRunner(config={'timeout': 30})
         
         # Initialize evaluators
         self._init_evaluators()
@@ -209,15 +210,26 @@ class EvaluationEngine:
             Complete evaluation result dictionary
         """
         start_time = time.time()
+        context = dict(context or {})
+        question_id = context.get("question_id") or context.get("dataset_id") or context.get("id")
         
         try:
             # Call agent API
-            agent_response_data = await self.agent_runner.call_agent_api(
-                url=agent_url,
-                question=question,
-                context=context,
-                timeout=agent_timeout
-            )
+            if agent_url and agent_url.startswith("mock://"):
+                agent_response_data = self._simulate_agent_response(
+                    question=question,
+                    expected_answer=expected_answer,
+                    context=context
+                )
+            else:
+                context.pop("mock_response", None)
+                context.pop("_expected_answer", None)
+                agent_response_data = await self.agent_runner.call_agent_api(
+                    url=agent_url,
+                    question=question,
+                    context=context,
+                    timeout=agent_timeout
+                )
             
             agent_response = agent_response_data.get("answer", "")
             confidence = agent_response_data.get("confidence", 0.0)
@@ -237,9 +249,11 @@ class EvaluationEngine:
             if close_endpoint:
                 await self.agent_runner.close_agent(close_endpoint)
             
+            evaluated_at = time.time()
             return {
                 "status": EvaluationStatus.COMPLETED.value,
                 "question": question,
+                "question_id": question_id,
                 "agent_response": agent_response,
                 "evaluation_score": evaluation_result["evaluation_score"],
                 "evaluation_reasoning": evaluation_result["evaluation_reasoning"],
@@ -250,6 +264,7 @@ class EvaluationEngine:
                 "details": evaluation_result.get("details", {}),
                 "category": category.value,
                 "evaluation_method": evaluation_result.get("evaluation_method", "unknown"),
+                "evaluated_at": evaluated_at,
                 "error": None
             }
             
@@ -257,9 +272,11 @@ class EvaluationEngine:
             processing_time = time.time() - start_time
             logger.error(f"Task evaluation failed: {e}")
             
+            evaluated_at = time.time()
             return {
                 "status": EvaluationStatus.FAILED.value,
                 "question": question,
+                "question_id": question_id,
                 "agent_response": "",
                 "evaluation_score": 0.0,
                 "evaluation_reasoning": "",
@@ -270,6 +287,29 @@ class EvaluationEngine:
                 "details": {},
                 "category": category.value,
                 "evaluation_method": evaluation_method.value if evaluation_method else "unknown",
+                "evaluated_at": evaluated_at,
                 "error": str(e)
             }
-
+    
+    def _simulate_agent_response(self,
+                                 question: str,
+                                 expected_answer: Optional[str],
+                                 context: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate a deterministic mock agent response for offline evaluation."""
+        reference = (
+            context.get("mock_response")
+            or context.get("_expected_answer")
+            or expected_answer
+            or f"I am unable to locate the answer to: {question}"
+        )
+        response = reference
+        confidence = 0.85
+        dataset_id = context.get("dataset_id") or context.get("question_id")
+        if dataset_id:
+            response = f"[mock:{dataset_id}] {reference}"
+        return {
+            "answer": response,
+            "confidence": confidence,
+            "tools_used": [],
+            "metadata": {"mock": True, "source_question": question}
+        }
