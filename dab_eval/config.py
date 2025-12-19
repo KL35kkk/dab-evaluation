@@ -94,6 +94,23 @@ class DatasetConfig:
 
 
 @dataclass
+class CalibrationConfig:
+    """Calibration dataset configuration"""
+    path: str
+    method: str = "linear"  # linear or isotonic
+    question_field: str = "question_id"
+    score_field: str = "score"
+    min_pairs: int = 5
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'CalibrationConfig':
+        return cls(**data)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
 class EvaluatorConfig:
     """Evaluator configuration"""
     type: str = "hybrid"
@@ -102,15 +119,24 @@ class EvaluatorConfig:
     llm_evaluation_threshold: float = 0.5
     use_llm_evaluation: bool = True
     cascade_config: Optional[Dict[str, Any]] = None
+    calibration_config: Optional[CalibrationConfig] = None
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'EvaluatorConfig':
         """Create from dictionary"""
+        calibration_config = None
+        if 'calibration_config' in data and data['calibration_config']:
+            calibration_config = CalibrationConfig.from_dict(data['calibration_config'])
+        data = dict(data)
+        data['calibration_config'] = calibration_config
         return cls(**data)
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
-        return asdict(self)
+        result = asdict(self)
+        if self.calibration_config:
+            result['calibration_config'] = self.calibration_config.to_dict()
+        return result
 
 
 @dataclass

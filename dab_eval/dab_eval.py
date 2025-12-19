@@ -9,7 +9,7 @@ import csv
 import time
 import os
 import json
-from typing import Dict, Any, List, Optional, Union
+from typing import Dict, Any, List, Optional, Union, Tuple
 from dataclasses import dataclass
 import logging
 
@@ -35,6 +35,7 @@ from .runners.agent_runner import AgentRunner
 from .summarizers.default import DefaultSummarizer
 from .storage import ResultStorage
 from .task_manager import TaskManager
+from .calibration import CalibrationManager, CalibrationReport
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -89,6 +90,13 @@ class DABEvaluator:
         # Task storage (in-memory)
         self.results: List[Dict[str, Any]] = []
         self._ground_truth: Dict[str, float] = self._load_ground_truth(config.dataset_config)
+        self.calibration_config = None
+        self.calibration_targets: Dict[str, float] = {}
+        self._calibration_manager: Optional[CalibrationManager] = None
+        self._calibration_applied = False
+        if config.evaluator_config and config.evaluator_config.calibration_config:
+            self.calibration_config = config.evaluator_config.calibration_config
+            self.calibration_targets = self._load_calibration_targets(self.calibration_config)
         
         # Handle reuse_results if specified
         if config.reuse_results:
@@ -319,8 +327,11 @@ class DABEvaluator:
         Returns:
             Exported data (dict for JSON, string for CSV)
         """
+        calibration_report = self._apply_score_calibration()
         # Convert results to summary format
         summary = self.summarizer.summarize(self.results)
+        if calibration_report:
+            summary["calibration"] = calibration_report
         accuracy_analysis = self._run_accuracy_analysis()
         if accuracy_analysis:
             summary["accuracy_analysis"] = accuracy_analysis
@@ -340,6 +351,8 @@ class DABEvaluator:
                 }
             if accuracy_analysis:
                 details_payload["accuracy_analysis"] = accuracy_analysis
+            if calibration_report:
+                details_payload["calibration"] = calibration_report
             with open(details_path, 'w', encoding='utf-8') as f:
                 json.dump(details_payload, f, indent=2, ensure_ascii=False)
             
@@ -482,6 +495,50 @@ class DABEvaluator:
                     logger.warning(f"Failed to load ground truth file {resolved_path}: {exc}")
         return ground_truth
     
+    def _load_calibration_targets(self, calibration_config) -> Dict[str, float]:
+        """Load calibration targets from an external dataset."""
+        targets: Dict[str, float] = {}
+        if not calibration_config or not calibration_config.path:
+            return targets
+        path = calibration_config.path
+        try:
+            if path.endswith(".json"):
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, dict):
+                    for key, value in data.items():
+                        try:
+                            targets[str(key)] = float(value)
+                        except (TypeError, ValueError):
+                            continue
+                elif isinstance(data, list):
+                    for item in data:
+                        if not isinstance(item, dict):
+                            continue
+                        qid = item.get(calibration_config.question_field) or item.get("question_id")
+                        value = item.get(calibration_config.score_field) or item.get("score")
+                        if qid is None or value is None:
+                            continue
+                        try:
+                            targets[str(qid)] = float(value)
+                        except (TypeError, ValueError):
+                            continue
+            elif path.endswith(".csv"):
+                with open(path, "r", encoding="utf-8") as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        qid = row.get(calibration_config.question_field) or row.get("question_id")
+                        value = row.get(calibration_config.score_field) or row.get("score")
+                        if qid is None or value is None:
+                            continue
+                        try:
+                            targets[str(qid)] = float(value)
+                        except ValueError:
+                            continue
+        except Exception as exc:
+            logger.warning(f"Failed to load calibration dataset {path}: {exc}")
+        return targets
+    
     def _resolve_ground_truth_path(self, path: str, dataset_path: Optional[str]) -> Optional[str]:
         """Resolve ground truth path relative to dataset if needed."""
         if os.path.isabs(path):
@@ -508,6 +565,48 @@ class DABEvaluator:
                 if question_text:
                     lookup[str(question_text)] = float(value)
         return lookup
+    
+    def _apply_score_calibration(self) -> Optional[Dict[str, Any]]:
+        """Apply calibration to evaluation scores using labeled pairs."""
+        if not self.calibration_config or self._calibration_applied:
+            return None
+        calibration_pairs: List[Tuple[float, float]] = []
+        for result in self.results:
+            question_id = result.get("question_id")
+            target = None
+            if question_id and self.calibration_targets:
+                target = self.calibration_targets.get(str(question_id))
+            if target is None:
+                target = result.get("ground_truth_score")
+            if target is None:
+                continue
+            raw_score = float(result.get("evaluation_score", 0.0))
+            calibration_pairs.append((raw_score, float(target)))
+        if len(calibration_pairs) < max(2, self.calibration_config.min_pairs):
+            return None
+        self._calibration_manager = CalibrationManager(self.calibration_config.method)
+        self._calibration_manager.fit(calibration_pairs)
+        if not self._calibration_manager.fitted:
+            return None
+        for result in self.results:
+            raw_score = float(result.get("evaluation_score", 0.0))
+            calibrated = self._calibration_manager.transform(raw_score)
+            result.setdefault("details", {})
+            result["details"]["calibration"] = {
+                "raw_score": raw_score,
+                "calibrated_score": calibrated,
+                "method": self.calibration_config.method,
+            }
+            result["raw_score"] = raw_score
+            result["calibrated_score"] = calibrated
+            result["evaluation_score"] = calibrated
+        self._calibration_applied = True
+        report = self._calibration_manager.report(len(calibration_pairs))
+        return {
+            "method": report.method,
+            "pairs_used": report.pairs_used,
+            "parameters": report.parameters,
+        }
     
     def get_task_status(self, task_id: str) -> Optional[EvaluationStatus]:
         """Get task status by task_id"""
