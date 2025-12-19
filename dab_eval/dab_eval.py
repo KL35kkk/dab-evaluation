@@ -223,7 +223,8 @@ class DABEvaluator:
                     method_map = {
                         "rule_based": EvaluationMethod.RULE_BASED,
                         "llm_based": EvaluationMethod.LLM_BASED,
-                        "hybrid": EvaluationMethod.HYBRID
+                        "hybrid": EvaluationMethod.HYBRID,
+                        "cascade": EvaluationMethod.CASCADE,
                     }
                     
                     question_id = row.get(self.config.dataset_config.question_id_field, row.get("id", str(len(tasks) + 1)))

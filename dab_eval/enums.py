@@ -17,6 +17,7 @@ class EvaluationMethod(Enum):
     RULE_BASED = "rule_based"
     LLM_BASED = "llm_based"
     HYBRID = "hybrid"
+    CASCADE = "cascade"
 
 
 class EvaluationStatus(Enum):
@@ -25,4 +26,3 @@ class EvaluationStatus(Enum):
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     FAILED = "failed"
-

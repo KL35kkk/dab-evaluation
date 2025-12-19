@@ -129,6 +129,7 @@ dist/
 
 # Local samples
 sample/
+examples/sample_output/
 
 # Model files
 *.model

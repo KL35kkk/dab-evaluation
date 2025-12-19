@@ -10,6 +10,7 @@ import logging
 from .evaluation.base_evaluator import BaseEvaluator
 from .evaluation.llm_evaluator import LLMEvaluator
 from .evaluation.hybrid_evaluator import HybridEvaluator
+from .evaluation.cascade_evaluator import CascadeEvaluator
 from .enums import EvaluationMethod, TaskCategory, EvaluationStatus
 from .runners.agent_runner import AgentRunner
 
@@ -38,6 +39,8 @@ class EvaluationEngine:
         self.evaluator_config = evaluator_config or {}
         self.evaluators: Dict[str, BaseEvaluator] = {}
         self.agent_runner = agent_runner or AgentRunner(config={'timeout': 30})
+        self.default_method = (self.evaluator_config.get("type") or "hybrid").lower()
+        self._llm_evaluator_config: Dict[str, Any] = {}
         
         # Initialize evaluators
         self._init_evaluators()
@@ -60,6 +63,7 @@ class EvaluationEngine:
                 "temperature": self.llm_config.get("temperature", 0.3),
                 "max_tokens": self.llm_config.get("max_tokens", 2000)
             }
+            self._llm_evaluator_config = llm_evaluator_config
             self.evaluators["llm"] = LLMEvaluator(llm_evaluator_config)
             
             # Initialize Hybrid Evaluator
@@ -71,6 +75,9 @@ class EvaluationEngine:
                 "llm_config": llm_evaluator_config
             }
             self.evaluators["hybrid"] = HybridEvaluator(hybrid_config)
+            cascade_cfg = self.evaluator_config.get("cascade_config") or {}
+            cascade_cfg.setdefault("llm_config", llm_evaluator_config)
+            self.evaluators["cascade"] = CascadeEvaluator(cascade_cfg)
             
             logger.info("Evaluators initialized successfully")
             
@@ -80,6 +87,8 @@ class EvaluationEngine:
     
     def select_evaluation_method(self, category: TaskCategory) -> EvaluationMethod:
         """Intelligently select evaluation method based on task category"""
+        if self.default_method == "cascade":
+            return EvaluationMethod.CASCADE
         if category == TaskCategory.WEB_RETRIEVAL:
             return EvaluationMethod.RULE_BASED
         elif category == TaskCategory.WEB_ONCHAIN_RETRIEVAL:
@@ -94,6 +103,8 @@ class EvaluationEngine:
             return self.evaluators.get("llm")
         elif method == EvaluationMethod.HYBRID:
             return self.evaluators.get("hybrid")
+        elif method == EvaluationMethod.CASCADE:
+            return self.evaluators.get("cascade")
         else:
             # Rule-based evaluation uses simplified logic
             return None

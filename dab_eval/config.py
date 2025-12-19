@@ -101,6 +101,7 @@ class EvaluatorConfig:
     llm_based_weight: float = 0.7
     llm_evaluation_threshold: float = 0.5
     use_llm_evaluation: bool = True
+    cascade_config: Optional[Dict[str, Any]] = None
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'EvaluatorConfig':
