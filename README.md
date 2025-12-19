@@ -1,7 +1,7 @@
 # DAB Evaluation SDK
 
 
-**DAB (Decentralized Agent Benchmark)** is a comprehensive evaluation framework designed specifically for **Web3 agents**. As the decentralized ecosystem continues to evolve, autonomous agents are playing an increasingly critical role in interacting with blockchain networks, DeFi protocols, NFT marketplaces, and other Web3 infrastructure.
+**DAB (Decentralized Agent Benchmark)** is an evaluation framework designed specifically for **Web3 agents**. As the decentralized ecosystem continues to evolve, autonomous agents are playing an increasingly critical role in interacting with blockchain networks, DeFi protocols, NFT marketplaces, and other Web3 infrastructure.
 
 DAB provides standardized benchmarks and evaluation tools to assess the capabilities of Web3 agents across key scenarios:
 
