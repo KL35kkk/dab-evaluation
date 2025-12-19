@@ -30,7 +30,7 @@ from .config import (
 )
 from .evaluation_engine import EvaluationEngine
 from .evaluation.accuracy_analysis import EvaluationAccuracyAnalyzer
-from .runners.local import LocalRunner
+from .runners.local_runner import LocalRunner
 from .runners.agent_runner import AgentRunner
 from .summarizers.default import DefaultSummarizer
 from .storage import ResultStorage
@@ -407,6 +407,9 @@ class DABEvaluator:
             self.results,
             ground_truth if ground_truth else None
         )
+        alerts = (analysis.get("variance_alerts") or {}).get("alerts") or []
+        if alerts:
+            logger.warning("Variance alerts detected for %d questions", len(alerts))
         try:
             os.makedirs(self.output_path, exist_ok=True)
             analysis_path = os.path.join(self.output_path, "accuracy_analysis.json")

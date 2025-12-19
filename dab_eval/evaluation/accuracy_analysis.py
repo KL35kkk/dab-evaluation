@@ -75,6 +75,38 @@ class EvaluationAccuracyAnalyzer:
             "questions_with_multiple_runs": sum(1 for r in question_groups.values() if len(r) >= 2)
         }
     
+    def detect_variance_alerts(
+            self,
+            evaluation_results: List[Dict[str, Any]],
+            question_id_key: str = "question",
+            variance_threshold: float = 0.2,
+            min_runs: int = 2) -> Dict[str, Any]:
+        """Identify questions whose scores vary too much across runs."""
+        alerts = []
+        groups = defaultdict(list)
+        for result in evaluation_results:
+            qid = result.get(question_id_key, "")
+            groups[qid].append(result.get("evaluation_score", 0.0))
+        for qid, scores in groups.items():
+            if len(scores) < min_runs:
+                continue
+            mean_score = sum(scores) / len(scores)
+            variance = sum((s - mean_score) ** 2 for s in scores) / len(scores)
+            std_dev = variance ** 0.5
+            if std_dev >= variance_threshold:
+                alerts.append({
+                    "question": qid,
+                    "std_dev": std_dev,
+                    "mean_score": mean_score,
+                    "runs": len(scores),
+                })
+        return {
+            "alerts": alerts,
+            "threshold": variance_threshold,
+            "min_runs": min_runs,
+            "total_questions": len(groups),
+        }
+    
     def detect_bias(self, 
                     evaluation_results: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
@@ -271,6 +303,7 @@ class EvaluationAccuracyAnalyzer:
             "consistency": self.analyze_consistency(evaluation_results),
             "bias_detection": self.detect_bias(evaluation_results),
         }
+        analysis["variance_alerts"] = self.detect_variance_alerts(evaluation_results)
         
         if ground_truth:
             analysis["confidence_accuracy"] = self.analyze_confidence_accuracy(
@@ -330,4 +363,3 @@ class EvaluationAccuracyAnalyzer:
             return 0.0
         
         return numerator / denominator
-

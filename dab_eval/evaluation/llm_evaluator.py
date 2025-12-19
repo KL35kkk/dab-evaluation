@@ -1,10 +1,10 @@
 """
 LLM Evaluator for DAB Evaluation SDK
-LLM evaluator for DAB Evaluation SDK
 """
 
 import json
 import re
+import random
 from typing import Dict, Any, List, Optional, Tuple
 from .base_evaluator import BaseEvaluator
 
@@ -28,6 +28,9 @@ class LLMEvaluator(BaseEvaluator):
         self.require_valid_json = config.get("require_valid_json", True)
         self.enforce_schema = config.get("enforce_schema", True)
         self.retry_invalid_json = config.get("retry_invalid_json", True)
+        self.random_seed = config.get("random_seed")
+        self._rng = random.Random(self.random_seed) if self.random_seed is not None else None
+        self.trim_ratio = max(0.0, min(0.45, float(config.get("trim_ratio", 0.0))))
 
         self.client = None
         if config.get("client"):
@@ -70,8 +73,9 @@ class LLMEvaluator(BaseEvaluator):
 
             sample_results = []
             for sample_index in range(self.num_samples):
+                seed = self._rng.randint(0, 2**31 - 1) if self._rng else None
                 sample_results.append(
-                    self._evaluate_single_sample(messages, sample_index)
+                    self._evaluate_single_sample(messages, sample_index, seed)
                 )
 
             return self._aggregate_samples(sample_results)
@@ -130,14 +134,14 @@ If information is insufficient, set confidence <= 0.3 and explain why.
         
         return prompt
 
-    def _evaluate_single_sample(self, messages: List[Dict[str, str]], sample_index: int) -> Dict[str, Any]:
+    def _evaluate_single_sample(self, messages: List[Dict[str, str]], sample_index: int, seed: Optional[int]) -> Dict[str, Any]:
         """Run one LLM evaluation sample with retries for structured output."""
 
         last_error = ""
         last_response = ""
         for attempt in range(self.max_retries + 1):
             try:
-                llm_response = self._call_llm(messages)
+                llm_response = self._call_llm(messages, seed=seed)
                 last_response = llm_response
                 parsed = self._parse_llm_response(llm_response)
                 if parsed["valid"] or not self.require_valid_json:
@@ -164,17 +168,21 @@ If information is insufficient, set confidence <= 0.3 and explain why.
             "flags": ["invalid_llm_response"],
             "raw_response": last_response,
             "sample_index": sample_index,
+            "seed": seed,
             "attempt": self.max_retries + 1,
             "valid": False,
         }
 
-    def _call_llm(self, messages: List[Dict[str, str]]) -> str:
-        response = self.client.chat.completions.create(
+    def _call_llm(self, messages: List[Dict[str, str]], seed: Optional[int] = None) -> str:
+        request_kwargs = dict(
             model=self.model_name,
             messages=messages,
             temperature=self.temperature,
             max_tokens=self.max_tokens,
         )
+        if seed is not None:
+            request_kwargs["seed"] = seed
+        response = self.client.chat.completions.create(**request_kwargs)
         return response.choices[0].message.content
 
     def _parse_llm_response(self, llm_response: str) -> Dict[str, Any]:
@@ -255,6 +263,8 @@ If information is insufficient, set confidence <= 0.3 and explain why.
             "samples": samples,
             "sample_count": len(samples),
             "valid_sample_count": len(valid_samples),
+            "random_seed": self.random_seed,
+            "trim_ratio": self.trim_ratio,
         }
 
         if dimension_scores:
@@ -275,11 +285,16 @@ If information is insufficient, set confidence <= 0.3 and explain why.
     def _trimmed_mean(self, values: List[float]) -> float:
         if not values:
             return 0.0
-        if len(values) < 3:
+        if self.trim_ratio <= 0 or len(values) < 3:
             return sum(values) / len(values)
         sorted_values = sorted(values)
-        trimmed = sorted_values[1:-1]
-        return sum(trimmed) / len(trimmed) if trimmed else sum(sorted_values) / len(sorted_values)
+        trim = min(len(sorted_values) // 2, max(0, int(len(sorted_values) * self.trim_ratio)))
+        if trim == 0:
+            return sum(sorted_values) / len(sorted_values)
+        trimmed = sorted_values[trim:-trim] if trim > 0 else sorted_values
+        if not trimmed:
+            return sum(sorted_values) / len(sorted_values)
+        return sum(trimmed) / len(trimmed)
 
     def _extract_json_blob(self, text: str) -> str:
         if not text:
