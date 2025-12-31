@@ -5,6 +5,8 @@ LLM Evaluator for DAB Evaluation SDK
 import json
 import re
 import random
+import os
+import hashlib
 from typing import Dict, Any, List, Optional, Tuple
 from .base_evaluator import BaseEvaluator
 
@@ -31,6 +33,8 @@ class LLMEvaluator(BaseEvaluator):
         self.random_seed = config.get("random_seed")
         self._rng = random.Random(self.random_seed) if self.random_seed is not None else None
         self.trim_ratio = max(0.0, min(0.45, float(config.get("trim_ratio", 0.0))))
+        self.enable_cache = bool(config.get("enable_cache", False))
+        self.cache_dir = config.get("cache_dir", "output/llm_cache")
 
         self.client = None
         if config.get("client"):
@@ -174,6 +178,21 @@ If information is insufficient, set confidence <= 0.3 and explain why.
         }
 
     def _call_llm(self, messages: List[Dict[str, str]], seed: Optional[int] = None) -> str:
+        cache_hit = False
+        cache_path = None
+        cache_key = None
+        if self.enable_cache:
+            cache_key = self._cache_key(messages, seed)
+            cache_path = os.path.join(self.cache_dir, f"{cache_key}.json")
+            if os.path.exists(cache_path):
+                try:
+                    with open(cache_path, "r", encoding="utf-8") as f:
+                        cached = json.load(f)
+                    if "content" in cached:
+                        return cached["content"]
+                except Exception:
+                    pass
+
         request_kwargs = dict(
             model=self.model_name,
             messages=messages,
@@ -183,7 +202,27 @@ If information is insufficient, set confidence <= 0.3 and explain why.
         if seed is not None:
             request_kwargs["seed"] = seed
         response = self.client.chat.completions.create(**request_kwargs)
-        return response.choices[0].message.content
+        content = response.choices[0].message.content
+
+        if self.enable_cache and cache_path:
+            try:
+                os.makedirs(self.cache_dir, exist_ok=True)
+                with open(cache_path, "w", encoding="utf-8") as f:
+                    json.dump({"content": content}, f, ensure_ascii=False, indent=2)
+            except Exception:
+                pass
+        return content
+
+    def _cache_key(self, messages: List[Dict[str, str]], seed: Optional[int]) -> str:
+        payload = {
+            "model": self.model_name,
+            "messages": messages,
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+            "seed": seed,
+        }
+        blob = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+        return hashlib.md5(blob.encode("utf-8")).hexdigest()
 
     def _parse_llm_response(self, llm_response: str) -> Dict[str, Any]:
         """Parse and validate LLM response enforcing schema."""

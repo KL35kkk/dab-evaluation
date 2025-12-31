@@ -33,6 +33,9 @@ class LLMConfig:
     api_key: str
     temperature: float = 0.3
     max_tokens: int = 2000
+    enable_cache: bool = False
+    cache_dir: str = "output/llm_cache"
+    random_seed: Optional[int] = None
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'LLMConfig':

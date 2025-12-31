@@ -61,7 +61,10 @@ class EvaluationEngine:
                 "base_url": self.llm_config["base_url"],
                 "api_key": self.llm_config["api_key"],
                 "temperature": self.llm_config.get("temperature", 0.3),
-                "max_tokens": self.llm_config.get("max_tokens", 2000)
+                "max_tokens": self.llm_config.get("max_tokens", 2000),
+                "enable_cache": self.llm_config.get("enable_cache", False),
+                "cache_dir": self.llm_config.get("cache_dir", "output/llm_cache"),
+                "random_seed": self.llm_config.get("random_seed"),
             }
             self._llm_evaluator_config = llm_evaluator_config
             self.evaluators["llm"] = LLMEvaluator(llm_evaluator_config)
