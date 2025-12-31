@@ -226,6 +226,59 @@ The SDK supports both JSON and Python configuration files. Here's a complete exa
 
 See `configs/example_config.py` for a Python-based configuration example.
 
+## Dataset Format
+
+### Benchmark CSV Structure
+
+The benchmark dataset (`data/benchmark.csv`) follows this structure:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | string | Yes | Unique question identifier |
+| `question` | string | Yes | The evaluation question |
+| `answer` | string | Yes | **Ground truth answer** for evaluating agent responses |
+| `category` | string | Yes | Task category (web_retrieval, onchain_retrieval, web_onchain_retrieval) |
+| `task_type` | string | Yes | Specific task type (e.g., single_doc_fact_qa, event_timeline) |
+| `evaluation_method` | string | Yes | Evaluation method (rule_based, llm_based, hybrid, cascade) |
+| `ground_truth_score` | float | Optional | Human-annotated score for meta-evaluation (validating the evaluation system itself) |
+
+### Understanding Ground Truth
+
+The dataset uses two levels of ground truth:
+
+#### 1. **Answer Field** - Agent Evaluation Ground Truth
+The `answer` field contains the **standard/reference answer** used to evaluate agent responses:
+
+```csv
+id,question,answer,category,task_type,evaluation_method
+1,"What is the date (UTC) when the US SEC approved Bitcoin spot ETF?","2024/1/10","web_retrieval","single_doc_fact_qa","rule_based"
+```
+
+This answer is passed as `expected_answer` to evaluators, which:
+- Compare agent responses against it using rule-based, LLM-based, or hybrid methods
+- Calculate similarity scores, extract key facts, and perform semantic matching
+- Generate evaluation scores (0.0 - 1.0) and reasoning
+
+#### 2. **Ground Truth Score Field** - Evaluation System Validation (Optional)
+The `ground_truth_score` field (when present) contains **human-annotated scores** for validating the evaluation system itself:
+
+```csv
+id,question,answer,...,ground_truth_score
+1,"...","2024/1/10",...,0.95
+```
+
+This meta-evaluation score is used by `EvaluationAccuracyAnalyzer` to:
+- Measure correlation between system scores and human judgments
+- Calculate precision, recall, and F1 scores for the evaluation system
+- Detect biases and calibration issues
+
+**Note:** The `ground_truth_score` field is currently not included in the standard benchmark dataset. To enable evaluation accuracy analysis, you can:
+1. Manually annotate a subset of questions with ground truth scores
+2. Add a `ground_truth_score` column to your CSV
+3. Or provide a separate ground truth file via `dataset_config.ground_truth_path`
+
+See `examples/evaluate_accuracy.py` and `EVALUATION_ACCURACY.md` for detailed accuracy analysis workflows.
+
 ## Evaluation Methods
 
 The SDK automatically selects evaluation methods based on task categories, but you can also specify them explicitly:
@@ -261,12 +314,6 @@ The SDK provides comprehensive result analysis:
 - Performance by task category
 - Success rates per category
 - Average scores per category
-
-**Score Distribution:**
-- Excellent (≥0.8)
-- Good (0.6-0.8)
-- Fair (0.4-0.6)
-- Poor (<0.4)
 
 Results are exported in both JSON (detailed) and CSV (tabular) formats for easy analysis and reporting.
 

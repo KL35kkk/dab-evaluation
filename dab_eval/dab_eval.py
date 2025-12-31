@@ -204,7 +204,10 @@ class DABEvaluator:
     async def evaluate_agent_with_dataset(self,
         agent_metadata: AgentMetadata,
         dataset_path: str,
-                                         max_tasks: Optional[int] = None) -> List[EvaluationResult]:
+        max_tasks: Optional[int] = None,
+        n_replicas: int = 1,
+        k: Optional[int] = None,
+        pass_k_threshold: float = 0.7) -> List[EvaluationResult]:
         """
         Evaluate Agent using dataset.
         
@@ -212,6 +215,9 @@ class DABEvaluator:
             agent_metadata: Agent metadata
             dataset_path: Path to dataset CSV file
             max_tasks: Maximum number of tasks to evaluate (None = all)
+            n_replicas: Number of replicas per question (for consistency/Pass@k)
+            k: Optional Pass@k parameter (stored in context for downstream analyzers)
+            pass_k_threshold: Score threshold for success when computing Pass@k
             
         Returns:
             List of EvaluationResult instances
@@ -275,6 +281,17 @@ class DABEvaluator:
         
         if max_tasks:
             tasks = tasks[:max_tasks]
+
+        # Duplicate tasks for multiple replicas if requested
+        replicas = max(1, int(n_replicas or 1))
+        if replicas > 1:
+            replicated_tasks = []
+            for replica_idx in range(replicas):
+                for task in tasks:
+                    task_copy = json.loads(json.dumps(task))
+                    task_copy["context"]["replica_index"] = replica_idx
+                    replicated_tasks.append(task_copy)
+            tasks = replicated_tasks
         
         # Evaluate all tasks
         results = []
@@ -290,6 +307,10 @@ class DABEvaluator:
                     evaluation_method=task_data["evaluation_method"],
                     expected_answer=task_data["expected_answer"]
                 )
+                # annotate pass@k related metadata for downstream analysis
+                result_dict = self.results[-1]
+                result_dict.setdefault("pass_k_threshold", pass_k_threshold)
+                result_dict.setdefault("k", k)
                 results.append(result)
                 
             except Exception as e:

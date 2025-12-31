@@ -341,6 +341,61 @@ class EvaluationAccuracyAnalyzer:
         }
         
         return analysis
+
+    def calculate_pass_at_k(
+        self,
+        evaluation_results: List[Dict[str, Any]],
+        k: int = 1,
+        threshold: float = 0.7,
+        question_id_key: str = "question",
+    ) -> Dict[str, Any]:
+        """
+        Calculate Pass@k per question and overall (industry-standard metric).
+        
+        Args:
+            evaluation_results: List of evaluation results (with evaluation_score)
+            k: Pass@k parameter
+            threshold: Score threshold for counting a success
+            question_id_key: Key to group multiple runs of the same question
+        """
+        question_groups: Dict[str, List[float]] = defaultdict(list)
+        for result in evaluation_results:
+            qid = result.get(question_id_key, "")
+            score = float(result.get("evaluation_score", 0.0))
+            question_groups[qid].append(score)
+
+        pass_details = {}
+        per_question_pass = []
+        for qid, scores in question_groups.items():
+            n = len(scores)
+            c = sum(1 for s in scores if s >= threshold)
+            if n == 0 or k <= 0:
+                continue
+            if n < k:
+                # Not enough samples; approximate with empirical pass rate
+                pass_prob = c / n
+            elif n - c < k:
+                pass_prob = 1.0
+            else:
+                # Pass@k = 1 - comb(n - c, k) / comb(n, k)
+                numerator = math.comb(n - c, k) if n - c >= k else 0
+                denominator = math.comb(n, k)
+                pass_prob = 1.0 - (numerator / denominator if denominator > 0 else 0.0)
+            pass_details[qid] = {
+                "n": n,
+                "successes": c,
+                "pass_at_k": pass_prob,
+            }
+            per_question_pass.append(pass_prob)
+
+        overall = sum(per_question_pass) / len(per_question_pass) if per_question_pass else 0.0
+        return {
+            "overall_pass_at_k": overall,
+            "threshold": threshold,
+            "k": k,
+            "total_questions": len(per_question_pass),
+            "details": pass_details,
+        }
     
     def _calculate_correlation(self, x: List[float], y: List[float]) -> float:
         """Calculate Pearson correlation coefficient"""
@@ -363,4 +418,3 @@ class EvaluationAccuracyAnalyzer:
             return 0.0
         
         return numerator / denominator
-
