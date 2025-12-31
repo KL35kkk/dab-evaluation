@@ -466,8 +466,15 @@ class DABEvaluator:
             except Exception as exc:
                 logger.debug(f"Skip loading inline ground truth: {exc}")
         
-        if dataset_config.ground_truth_path:
-            resolved_path = self._resolve_ground_truth_path(dataset_config.ground_truth_path, dataset_path)
+        # Prefer explicit ground truth path; otherwise fall back to a default sibling file
+        candidate_path = dataset_config.ground_truth_path
+        if not candidate_path and dataset_path:
+            dataset_dir = os.path.dirname(os.path.abspath(dataset_path))
+            default_candidate = os.path.join(dataset_dir, "ground_truth_sample.json")
+            if os.path.exists(default_candidate):
+                candidate_path = default_candidate
+        if candidate_path:
+            resolved_path = self._resolve_ground_truth_path(candidate_path, dataset_path)
             if resolved_path and os.path.exists(resolved_path):
                 try:
                     with open(resolved_path, 'r', encoding='utf-8') as f:
