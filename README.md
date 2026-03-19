@@ -1,4 +1,4 @@
-# DAB Evaluation SDK v2
+# DAB Evaluation
 
 **DAB (Decentralized Agent Benchmark)** is a **production-grade Agent Evaluation Pipeline** designed specifically for **Web3 agents**. It goes beyond simple Q&A scoring — it's a full evaluation infrastructure that continuously controls agent quality, cost, and risk across iterative development cycles.
 
