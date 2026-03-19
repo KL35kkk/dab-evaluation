@@ -10,7 +10,7 @@ A comprehensive evaluation framework for Web3 agents with support for:
 - Export results in JSON, CSV, and other formats
 """
 
-__version__ = "1.0.0"
+__version__ = "2.0.0"
 __author__ = "DAB Team"
 __email__ = "dab@example.com"
 
@@ -46,8 +46,53 @@ from .evaluation import (
 )
 
 # Import runners and summarizers
-from .runners import BaseRunner, LocalRunner
+from .runners import BaseRunner, LocalRunner, MultiTrialRunner, MultiTrialResult
 from .summarizers import BaseSummarizer, DefaultSummarizer
+
+# Import v2 data structures
+from .trajectory import (
+    Step,
+    StepType,
+    Trajectory,
+    Outcome,
+    TrackedMetrics,
+    GradeResult,
+    Trial,
+)
+
+# Import datasets
+from .datasets import TaskHub, TaskTier, HubTask
+
+# Import tool mocking
+from .tools import MockToolRegistry, ToolFailureMode, register_default_tools
+
+# Import scenario generator
+from .scenario_generator import ScenarioGenerator, ScenarioTask, Perturbation
+
+# Import CI gate
+from .ci_gate import CIGate, GateConfig, GateResult
+
+# Import analyzer
+from .analyzer import (
+    FailureCategory,
+    FailureClassifier,
+    ClassifiedFailure,
+    RegressionDetector,
+    RegressionReport,
+    TaskSnapshot,
+    RootCauseAnalyzer,
+    RootCauseReport,
+)
+
+# Import graders
+from .graders import (
+    BaseGrader,
+    DeterministicTestsGrader,
+    LLMRubricGrader,
+    StateCheckGrader,
+    ToolCallsGrader,
+    build_grader,
+)
 
 # Import storage and task management
 from .storage import ResultStorage
@@ -92,6 +137,55 @@ __all__ = [
     # Runners
     "BaseRunner",
     "LocalRunner",
+    "MultiTrialRunner",
+    "MultiTrialResult",
+
+    # v2 trajectory / trial data structures
+    "Step",
+    "StepType",
+    "Trajectory",
+    "Outcome",
+    "TrackedMetrics",
+    "GradeResult",
+    "Trial",
+
+    # Graders
+    "BaseGrader",
+    "DeterministicTestsGrader",
+    "LLMRubricGrader",
+    "StateCheckGrader",
+    "ToolCallsGrader",
+    "build_grader",
+
+    # Datasets
+    "TaskHub",
+    "TaskTier",
+    "HubTask",
+
+    # Tool mocking
+    "MockToolRegistry",
+    "ToolFailureMode",
+    "register_default_tools",
+
+    # Scenario generator
+    "ScenarioGenerator",
+    "ScenarioTask",
+    "Perturbation",
+
+    # CI Gate
+    "CIGate",
+    "GateConfig",
+    "GateResult",
+
+    # Analyzer
+    "FailureCategory",
+    "FailureClassifier",
+    "ClassifiedFailure",
+    "RegressionDetector",
+    "RegressionReport",
+    "TaskSnapshot",
+    "RootCauseAnalyzer",
+    "RootCauseReport",
     
     # Summarizers
     "BaseSummarizer",
